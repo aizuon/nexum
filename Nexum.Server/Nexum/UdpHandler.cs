@@ -1,0 +1,156 @@
+using System;
+using System.Diagnostics;
+using System.Net;
+using System.Threading.Tasks;
+using DotNetty.Transport.Channels;
+using Nexum.Core;
+using Serilog;
+using SerilogConstants = Serilog.Core.Constants;
+
+namespace Nexum.Server
+{
+    internal class UdpHandler : ChannelHandlerAdapter
+    {
+        internal static readonly ILogger
+            Logger = Log.ForContext(SerilogConstants.SourceContextPropertyName, nameof(UdpHandler));
+
+        private static readonly Stopwatch Stopwatch = Stopwatch.StartNew();
+
+        internal readonly NetServer Owner;
+
+        internal UdpHandler(NetServer owner)
+        {
+            Owner = owner;
+        }
+
+        public override void ChannelRead(IChannelHandlerContext context, object obj)
+        {
+            var message = obj as UdpMessage;
+
+            var log = Logger.ForContext("EndPoint",
+                new IPEndPoint(message.EndPoint.Address.MapToIPv4(), message.EndPoint.Port).ToString());
+
+            Owner.UdpSessions.TryGetValue(message.FilterTag, out var session);
+
+            if (session == null)
+            {
+                var defragResult = Owner.UdpDefragBoard.PushFragment(
+                    message,
+                    (uint)HostId.None,
+                    Stopwatch.Elapsed.TotalSeconds,
+                    out var holepunchPacket,
+                    out string defragError);
+
+                if (defragResult == AssembledPacketError.Assembling)
+                {
+                    message.Content.Release();
+                    return;
+                }
+
+                if (defragResult == AssembledPacketError.Error)
+                {
+                    log.Warning("UDP defragmentation error for unknown session: {Error}", defragError);
+                    message.Content.Release();
+                    return;
+                }
+
+                var netMessage = new NetMessage(new ByteArray(holepunchPacket.Packet.AssembledData,
+                    holepunchPacket.Packet.AssembledData.Length));
+
+                netMessage.Read(out byte coreid);
+                var messageType = (MessageType)coreid;
+
+                if (messageType != MessageType.ServerHolepunch)
+                {
+                    log.Warning("Expected ServerHolepunch as first UDP message but got {MessageType}",
+                        messageType);
+                    message.Content.Release();
+                    return;
+                }
+
+                netMessage.Read(out Guid magicNumber);
+
+                Owner.MagicNumberSessions.TryGetValue(magicNumber, out var session2);
+
+                if (session2 == null)
+                {
+                    log.Warning("Invalid holepunch magic number {MagicNumber}", magicNumber);
+                    return;
+                }
+
+                lock (session2.UdpInitLock)
+                {
+                    if (session2.UdpSessionInitialized)
+                        return;
+
+                    session2.UdpSessionInitialized = true;
+                    session2.UdpEndPointInternal = message.EndPoint;
+                    Owner.UdpSessions.TryAdd(FilterTag.Create(session2.HostId, (uint)HostId.Server), session2);
+                }
+
+                session2.Logger.Information("UDP holepunch successful, endpoint = {UdpEndPoint}",
+                    session2.UdpEndPoint);
+
+                var serverHolepunchAck = new NetMessage();
+                serverHolepunchAck.WriteEnum(MessageType.ServerHolepunchAck);
+                serverHolepunchAck.Write(session2.HolepunchMagicNumber);
+                serverHolepunchAck.Write(session2.UdpEndPoint);
+
+                session2.NexumToClientUdpIfAvailable(serverHolepunchAck, true);
+                var capturedSession = session2;
+                Task.Run(async () =>
+                {
+                    for (int i = 0; i < HolepunchConstants.BurstCount; i++)
+                    {
+                        await Task.Delay(HolepunchConstants.BurstDelayMs);
+
+                        var burstAck = new NetMessage();
+                        burstAck.WriteEnum(MessageType.ServerHolepunchAck);
+                        burstAck.Write(capturedSession.HolepunchMagicNumber);
+                        burstAck.Write(capturedSession.UdpEndPoint);
+
+                        capturedSession.NexumToClientUdpIfAvailable(burstAck, true);
+                    }
+                });
+                message.Content.Release();
+                return;
+            }
+
+            session.LastUdpPing = DateTimeOffset.Now;
+
+            double currentTime = session.GetAbsoluteTime();
+
+            var result = session.UdpDefragBoard.PushFragment(
+                message,
+                session.HostId,
+                currentTime,
+                out var assembledPacket,
+                out string error);
+
+            if (result == AssembledPacketError.Assembling)
+            {
+                message.Content.Release();
+                return;
+            }
+
+            if (result == AssembledPacketError.Error)
+            {
+                session.Logger.Warning("UDP defragmentation error: {Error}", error);
+                message.Content.Release();
+                return;
+            }
+
+            var netMessage2 = new NetMessage(new ByteArray(assembledPacket.Packet.AssembledData,
+                assembledPacket.Packet.AssembledData.Length));
+            NetServerHandler.ReadFrame(Owner, session, netMessage2, message.EndPoint, true);
+
+            message.Content.Release();
+        }
+
+        public override Task WriteAsync(IChannelHandlerContext context, object message)
+        {
+            var udpMessage = message as UdpMessage;
+            return base.WriteAsync(context, udpMessage);
+        }
+    }
+}

@@ -1,0 +1,154 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Build Solution",
+            "type": "shell",
+            "command": "dotnet",
+            "args": [
+                "build",
+                "${workspaceFolder}/Nexum.sln",
+                "--configuration",
+                "Debug"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": "$msCompile",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared"
+            }
+        },
+        {
+            "label": "Build Solution (Release)",
+            "type": "shell",
+            "command": "dotnet",
+            "args": [
+                "build",
+                "${workspaceFolder}/Nexum.sln",
+                "--configuration",
+                "Release"
+            ],
+            "group": "build",
+            "problemMatcher": "$msCompile",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared"
+            }
+        },
+        {
+            "label": "Clean Solution",
+            "type": "shell",
+            "command": "dotnet",
+            "args": [
+                "clean",
+                "${workspaceFolder}/Nexum.sln"
+            ],
+            "group": "build",
+            "problemMatcher": "$msCompile",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared"
+            }
+        },
+        {
+            "label": "Run Unit Tests",
+            "type": "shell",
+            "command": "dotnet",
+            "args": [
+                "test",
+                "${workspaceFolder}/Nexum.Tests/Nexum.Tests.csproj",
+                "--filter",
+                "FullyQualifiedName!~Integration",
+                "--no-build",
+                "--",
+                "xUnit.ReporterSwitch=verbose"
+            ],
+            "group": {
+                "kind": "test",
+                "isDefault": true
+            },
+            "problemMatcher": "$msCompile",
+            "dependsOn": "Build Solution",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": true,
+                "panel": "shared",
+                "showReuseMessage": false
+            }
+        },
+        {
+            "label": "Run Integration Tests",
+            "type": "shell",
+            "command": "dotnet",
+            "args": [
+                "test",
+                "${workspaceFolder}/Nexum.Tests/Nexum.Tests.csproj",
+                "--filter",
+                "FullyQualifiedName~Integration",
+                "--no-build",
+                "--",
+                "xUnit.ReporterSwitch=verbose"
+            ],
+            "group": "test",
+            "problemMatcher": "$msCompile",
+            "dependsOn": "Build Solution",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": true,
+                "panel": "shared",
+                "showReuseMessage": false
+            }
+        },
+        {
+            "label": "Run All Tests (Coverage)",
+            "type": "shell",
+            "command": "dotnet",
+            "args": [
+                "test",
+                "${workspaceFolder}/Nexum.Tests/Nexum.Tests.csproj",
+                "--collect:XPlat Code Coverage",
+                "--results-directory",
+                "${workspaceFolder}/Nexum.Tests/TestResults",
+                "--no-build",
+                "--",
+                "xUnit.ReporterSwitch=verbose"
+            ],
+            "group": "test",
+            "problemMatcher": "$msCompile",
+            "dependsOn": "Build Solution",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": true,
+                "panel": "shared",
+                "showReuseMessage": false
+            }
+        },
+        {
+            "label": "Generate Coverage Report",
+            "type": "shell",
+            "command": "${workspaceFolder}/scripts/generate-coverage-report.bat",
+            "args": [],
+            "group": "test",
+            "problemMatcher": [],
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": true,
+                "panel": "shared",
+                "showReuseMessage": false
+            }
+        }
+    ]
+}

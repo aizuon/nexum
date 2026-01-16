@@ -1,0 +1,37 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug TestServer",
+            "type": "coreclr",
+            "request": "launch",
+            "preLaunchTask": "Build Solution",
+            "program": "${workspaceFolder}/TestServer/bin/Debug/net10.0/TestServer.dll",
+            "args": [],
+            "cwd": "${workspaceFolder}/TestServer",
+            "console": "integratedTerminal",
+            "stopAtEntry": false
+        },
+        {
+            "name": "Debug TestClient",
+            "type": "coreclr",
+            "request": "launch",
+            "preLaunchTask": "Build Solution",
+            "program": "${workspaceFolder}/TestClient/bin/Debug/net10.0/TestClient.dll",
+            "args": [],
+            "cwd": "${workspaceFolder}/TestClient",
+            "console": "integratedTerminal",
+            "stopAtEntry": false
+        }
+    ],
+    "compounds": [
+        {
+            "name": "Debug Server + Client",
+            "configurations": [
+                "Debug TestServer",
+                "Debug TestClient"
+            ],
+            "stopAll": true
+        }
+    ]
+}
