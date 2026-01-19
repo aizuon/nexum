@@ -21,12 +21,22 @@ namespace Nexum.Client
 {
     public class NetClient : NetCore
     {
+        public delegate void OnConnectedDelegate();
+
+        public delegate void OnConnectingDelegate();
+
         public delegate void OnConnectionCompleteDelegate();
+
+        public delegate void OnDisconnectedDelegate();
+
+        public delegate void OnHandshakingDelegate();
 
         public delegate void OnRMIReceiveDelegate(NetMessage message, ushort rmiId);
 
         internal static readonly ConcurrentDictionary<ServerType, NetClient> Clients =
             new ConcurrentDictionary<ServerType, NetClient>();
+
+        private readonly object _stateLock = new object();
 
         private readonly Stopwatch _stopwatch = Stopwatch.StartNew();
 
@@ -37,13 +47,22 @@ namespace Nexum.Client
         internal readonly object SendLock = new object();
 
         internal readonly object UdpHolepunchLock = new object();
+        private ConnectionState _connectionState = ConnectionState.Disconnected;
 
         private IEventLoopGroup _eventLoopGroup;
 
         internal ushort AimForPort = NetConfig.UdpAimForPort;
 
         internal NetCrypt Crypt;
+
+        public OnConnectedDelegate OnConnected = () => { };
+
+        public OnConnectingDelegate OnConnecting = () => { };
         public OnConnectionCompleteDelegate OnConnectionComplete = () => { };
+
+        public OnDisconnectedDelegate OnDisconnected = () => { };
+
+        public OnHandshakingDelegate OnHandshaking = () => { };
         public OnRMIReceiveDelegate OnRMIReceive = (message, rmiId) => { };
 
         internal uint P2PFirstFrameNumber;
@@ -95,14 +114,106 @@ namespace Nexum.Client
 
         public NetworkProfile NetworkSimulationProfile { get; set; }
 
+        internal byte[] PinnedServerPublicKey { get; private set; }
+
         public uint HostId { get; internal set; }
 
         public P2PGroup P2PGroup { get; internal set; }
 
         public bool UdpEnabled { get; internal set; }
 
+        public ConnectionState ConnectionState
+        {
+            get
+            {
+                lock (_stateLock)
+                {
+                    return _connectionState;
+                }
+            }
+        }
+
+        public event EventHandler<ConnectionStateChangedEventArgs> ConnectionStateChanged;
+
+        public void SetPinnedServerPublicKey(byte[] derEncodedKey)
+        {
+            if (derEncodedKey == null || derEncodedKey.Length == 0)
+                throw new ArgumentNullException(nameof(derEncodedKey));
+
+            PinnedServerPublicKey = derEncodedKey;
+            Logger.Information("Server public key pinned for certificate validation");
+        }
+
+        public void SetPinnedServerPublicKey(string base64Key)
+        {
+            if (string.IsNullOrWhiteSpace(base64Key))
+                throw new ArgumentNullException(nameof(base64Key));
+
+            PinnedServerPublicKey = Convert.FromBase64String(base64Key);
+            Logger.Information("Server public key pinned for certificate validation");
+        }
+
+        public void ClearPinnedServerPublicKey()
+        {
+            PinnedServerPublicKey = null;
+            Logger.Information("Server public key pinning disabled");
+        }
+
+        internal bool ValidateServerPublicKey(byte[] serverPublicKey)
+        {
+            if (PinnedServerPublicKey == null)
+                return true;
+
+            if (serverPublicKey == null)
+                return false;
+
+            if (PinnedServerPublicKey.Length != serverPublicKey.Length)
+                return false;
+
+            int diff = 0;
+            for (int i = 0; i < PinnedServerPublicKey.Length; i++)
+                diff |= PinnedServerPublicKey[i] ^ serverPublicKey[i];
+
+            return diff == 0;
+        }
+
+        internal void SetConnectionState(ConnectionState newState)
+        {
+            ConnectionState previousState;
+            lock (_stateLock)
+            {
+                if (_connectionState == newState)
+                    return;
+
+                previousState = _connectionState;
+                _connectionState = newState;
+            }
+
+            Logger.Information("Connection state changed: {PreviousState} -> {NewState}", previousState, newState);
+
+            var args = new ConnectionStateChangedEventArgs(previousState, newState);
+            ConnectionStateChanged?.Invoke(this, args);
+
+            switch (newState)
+            {
+                case ConnectionState.Connecting:
+                    OnConnecting();
+                    break;
+                case ConnectionState.Handshaking:
+                    OnHandshaking();
+                    break;
+                case ConnectionState.Connected:
+                    OnConnected();
+                    break;
+                case ConnectionState.Disconnected:
+                    OnDisconnected();
+                    break;
+            }
+        }
+
         public async Task ConnectAsync(IPEndPoint ipEndPoint)
         {
+            SetConnectionState(ConnectionState.Connecting);
             Logger.Debug("Connecting to {Endpoint}", ipEndPoint.ToIPv4String());
             _eventLoopGroup = new MultithreadEventLoopGroup();
             Channel = await new Bootstrap()
@@ -482,6 +593,9 @@ namespace Nexum.Client
         public override void Dispose()
         {
             Logger.Information("Disposing NetClient for {ServerType}", ServerType);
+
+            SetConnectionState(ConnectionState.Disconnected);
+
             PingLoop?.Stop();
             StopReliableUdpLoop();
 

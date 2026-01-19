@@ -26,7 +26,8 @@ namespace Nexum.Server
             bool encrypted = Server.NetSettings.EnableP2PEncryptedMessaging;
             NetCrypt crypt = null;
             if (encrypted)
-                crypt = new NetCrypt(128, 0);
+                crypt = new NetCrypt(Server.NetSettings.EncryptedMessageKeyLength,
+                    Server.NetSettings.FastEncryptedMessageKeyLength);
 
             var memberToJoin = new P2PMember(HostId, session);
             if (P2PMembersInternal.TryAdd(session.HostId, memberToJoin))

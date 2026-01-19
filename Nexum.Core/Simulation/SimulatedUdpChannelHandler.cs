@@ -22,10 +22,10 @@ namespace Nexum.Core.Simulation
         private readonly Random _random;
         private readonly Stopwatch _stopwatch = Stopwatch.StartNew();
 
-        private readonly ConcurrentDictionary<IPEndPoint, int> _symmetricPortMappings =
+        private readonly ConcurrentDictionary<IPEndPoint, int> _symmetricHolepunchAttempts =
             new ConcurrentDictionary<IPEndPoint, int>();
 
-        private readonly ConcurrentDictionary<IPEndPoint, int> _symmetricHolepunchAttempts =
+        private readonly ConcurrentDictionary<IPEndPoint, int> _symmetricPortMappings =
             new ConcurrentDictionary<IPEndPoint, int>();
 
         private readonly object _syncLock = new object();

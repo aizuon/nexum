@@ -1366,6 +1366,20 @@ namespace Nexum.Client
                     return;
 
                 byte[] encodedRsaKey = rsaKeyBuffer.GetBuffer();
+
+                if (client.PinnedServerPublicKey != null)
+                {
+                    if (!client.ValidateServerPublicKey(encodedRsaKey))
+                    {
+                        client.Logger.Error(
+                            "Certificate pinning validation failed - server public key does not match pinned key. Possible MITM attack!");
+                        client.Channel?.CloseAsync();
+                        return;
+                    }
+
+                    client.Logger.Debug("Certificate pinning validation successful");
+                }
+
                 var rsaSequence = (DerSequence)Asn1Object.FromByteArray(encodedRsaKey);
 
                 var rsaParameters = new RSAParameters
@@ -1435,6 +1449,7 @@ namespace Nexum.Client
             client.HostId = hostId;
             client.UdpDefragBoard.LocalHostId = hostId;
             client.ServerGuid = serverGuid;
+            client.SetConnectionState(ConnectionState.Connected);
             client.OnConnectionComplete();
         }
 

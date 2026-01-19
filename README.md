@@ -410,6 +410,7 @@ public enum ServerType : byte
 The following features are planned or partially implemented:
 
 - [ ] **P2P Encrypted Messaging** - Keys are generated server-side but client-side encryption not yet applied to P2P messages
+- [ ] **Code Generation for RMI** - Source generator for type-safe RMI stubs instead of manual `rmiId` handling
 
 ## ⚙️ Configuration
 

@@ -207,6 +207,7 @@ namespace Nexum.Server
             notifyServerConnectSuccess.Write(new ByteArray());
             notifyServerConnectSuccess.Write(session.RemoteEndPoint);
 
+            session.SetConnectionState(ConnectionState.Connected);
             session.NexumToClient(notifyServerConnectSuccess);
         }
 

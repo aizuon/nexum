@@ -25,9 +25,11 @@ namespace Nexum.Server
         public override void ChannelActive(IChannelHandlerContext context)
         {
             uint hostId = Owner.HostIdFactory.New();
-            var session = new NetSession(Owner.ServerType, hostId, context.Channel);
+            var session = new NetSession(Owner, hostId, context.Channel);
             Owner.SessionsInternal.TryAdd(hostId, session);
             context.Channel.GetAttribute(ChannelAttributes.Session).Set(session);
+
+            session.SetConnectionState(ConnectionState.Handshaking);
 
             session.Logger.Information(
                 "New incoming client({HostId}) => {EndPoint}, total sessions = {SessionCount}",

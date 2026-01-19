@@ -216,13 +216,16 @@ namespace Nexum.Tests.Integration
         }
 
         protected async Task<NetClient> CreateClientAsync(
-            ServerType serverType = ServerType.Relay)
+            ServerType serverType = ServerType.Relay,
+            Action<NetClient> configure = null)
         {
             var endpoint = new IPEndPoint(DefaultAddress, TcpPort);
             var client = new NetClient(serverType);
 
             if (CurrentNetworkProfile != null)
                 client.NetworkSimulationProfile = CurrentNetworkProfile;
+
+            configure?.Invoke(client);
 
             await client.ConnectAsync(endpoint);
             CreatedClients.Add(client);

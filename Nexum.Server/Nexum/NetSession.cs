@@ -13,15 +13,20 @@ namespace Nexum.Server
 {
     public class NetSession : IDisposable
     {
+        private readonly object _stateLock = new object();
+
         private readonly Stopwatch _stopwatch = Stopwatch.StartNew();
 
         internal readonly ConcurrentQueue<PendingPeerHolepunchRequest> PendingPeerHolepunchRequests =
             new ConcurrentQueue<PendingPeerHolepunchRequest>();
 
+        private ConnectionState _connectionState = ConnectionState.Disconnected;
+
         internal volatile bool IsDisposed;
 
-        internal NetSession(ServerType serverType, uint hostId, IChannel channel)
+        internal NetSession(NetServer server, uint hostId, IChannel channel)
         {
+            Server = server;
             HostId = hostId;
             Channel = (ISocketChannel)channel;
             var remoteEndPoint = (IPEndPoint)Channel.RemoteAddress;
@@ -35,10 +40,12 @@ namespace Nexum.Server
             UdpFragBoard.DefragBoard = UdpDefragBoard;
 
             Logger = Log.ForContext("HostId", HostId).ForContext("EndPoint", RemoteEndPoint.Address.ToString())
-                .ForContext(Constants.SourceContextPropertyName, serverType + "Session");
+                .ForContext(Constants.SourceContextPropertyName, server.ServerType + "Session");
         }
 
         public uint HostId { get; }
+
+        internal NetServer Server { get; }
 
         public IPEndPoint LocalEndPoint { get; }
 
@@ -98,9 +105,21 @@ namespace Nexum.Server
             set => UdpLocalEndPoint = value;
         }
 
+        public ConnectionState ConnectionState
+        {
+            get
+            {
+                lock (_stateLock)
+                {
+                    return _connectionState;
+                }
+            }
+        }
+
         public void Dispose()
         {
             IsDisposed = true;
+            SetConnectionState(ConnectionState.Disconnected);
             Logger.Information("Session disposed for hostId = {HostId}", HostId);
             P2PGroup?.Leave(this);
 
@@ -115,6 +134,28 @@ namespace Nexum.Server
 
             Channel?.CloseAsync();
             Channel = null;
+        }
+
+        public event EventHandler<ConnectionStateChangedEventArgs> ConnectionStateChanged;
+
+        internal void SetConnectionState(ConnectionState newState)
+        {
+            ConnectionState previousState;
+            lock (_stateLock)
+            {
+                if (_connectionState == newState)
+                    return;
+
+                previousState = _connectionState;
+                _connectionState = newState;
+            }
+
+            Logger.Information("Connection state changed: {PreviousState} -> {NewState}", previousState, newState);
+
+            var args = new ConnectionStateChangedEventArgs(previousState, newState);
+            ConnectionStateChanged?.Invoke(this, args);
+
+            Server?.OnSessionConnectionStateChanged(this, previousState, newState);
         }
 
         public double GetAbsoluteTime()

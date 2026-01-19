@@ -13,6 +13,8 @@ using DotNetty.Transport.Channels;
 using DotNetty.Transport.Channels.Sockets;
 using Nexum.Core;
 using NexumCore.DotNetty.Codecs;
+using Org.BouncyCastle.Asn1.X509;
+using Org.BouncyCastle.Security;
 using Serilog;
 using Constants = Serilog.Core.Constants;
 
@@ -21,6 +23,14 @@ namespace Nexum.Server
     public class NetServer : NetCore
     {
         public delegate void OnRMIReceiveDelegate(NetSession session, NetMessage message, ushort rmiId);
+
+        public delegate void OnSessionConnectedDelegate(NetSession session);
+
+        public delegate void OnSessionConnectingDelegate(NetSession session);
+
+        public delegate void OnSessionDisconnectedDelegate(NetSession session);
+
+        public delegate void OnSessionHandshakingDelegate(NetSession session);
 
         private static readonly TimeSpan UdpSetupRetryInterval =
             TimeSpan.FromSeconds(HolepunchConfig.UdpSetupRetrySeconds);
@@ -35,6 +45,15 @@ namespace Nexum.Server
         private UdpSocket[] _udpSocketsCache;
 
         public OnRMIReceiveDelegate OnRMIReceive = (session, message, rmiId) => { };
+
+        public OnSessionConnectedDelegate OnSessionConnected = session => { };
+
+
+        public OnSessionConnectingDelegate OnSessionConnecting = session => { };
+
+        public OnSessionDisconnectedDelegate OnSessionDisconnected = session => { };
+
+        public OnSessionHandshakingDelegate OnSessionHandshaking = session => { };
 
         public NetServer(ServerType serverType, NetSettings netSettings = null,
             bool allowDirectP2P = true)
@@ -85,6 +104,81 @@ namespace Nexum.Server
         internal IPAddress IPAddress { get; set; }
 
         internal IEventLoopGroup EventLoopGroup { get; set; }
+
+        public event EventHandler<SessionConnectionStateChangedEventArgs> SessionConnectionStateChanged;
+
+        public void ImportRsaKey(string xmlString)
+        {
+            if (string.IsNullOrWhiteSpace(xmlString))
+                throw new ArgumentNullException(nameof(xmlString));
+
+            var newRsa = new RSACryptoServiceProvider(2048);
+            newRsa.FromXmlString(xmlString);
+
+            RSA?.Dispose();
+            RSA = newRsa;
+
+            Logger.Information("RSA key imported from XML format");
+        }
+
+        public void ImportRsaKey(RSAParameters parameters)
+        {
+            var newRsa = new RSACryptoServiceProvider(2048);
+            newRsa.ImportParameters(parameters);
+
+            RSA?.Dispose();
+            RSA = newRsa;
+
+            Logger.Information("RSA key imported from RSAParameters");
+        }
+
+        public void ImportRsaPrivateKey(byte[] privateKey)
+        {
+            if (privateKey == null || privateKey.Length == 0)
+                throw new ArgumentNullException(nameof(privateKey));
+
+            var newRsa = new RSACryptoServiceProvider(2048);
+
+            try
+            {
+                newRsa.ImportPkcs8PrivateKey(privateKey, out _);
+            }
+            catch
+            {
+                newRsa.ImportRSAPrivateKey(privateKey, out _);
+            }
+
+            RSA?.Dispose();
+            RSA = newRsa;
+
+            Logger.Information("RSA private key imported");
+        }
+
+        public void ImportRsaPrivateKeyFromPem(string pemString)
+        {
+            if (string.IsNullOrWhiteSpace(pemString))
+                throw new ArgumentNullException(nameof(pemString));
+
+            var newRsa = new RSACryptoServiceProvider(2048);
+            newRsa.ImportFromPem(pemString.AsSpan());
+
+            RSA?.Dispose();
+            RSA = newRsa;
+
+            Logger.Information("RSA private key imported from PEM");
+        }
+
+        public byte[] ExportRsaPublicKey()
+        {
+            var pubKey = DotNetUtilities.GetRsaPublicKey(RSA.ExportParameters(false));
+            var pubKeyStruct = new RsaPublicKeyStructure(pubKey.Modulus, pubKey.Exponent);
+            return pubKeyStruct.GetDerEncoded();
+        }
+
+        public string ExportRsaPublicKeyBase64()
+        {
+            return Convert.ToBase64String(ExportRsaPublicKey());
+        }
 
         private static NetSettings CreateNetSettings(NetSettings provided)
         {
@@ -145,6 +239,29 @@ namespace Nexum.Server
                 settings.EmergencyLogLineCount = provided.EmergencyLogLineCount;
 
             return settings;
+        }
+
+        internal void OnSessionConnectionStateChanged(NetSession session, ConnectionState previousState,
+            ConnectionState newState)
+        {
+            var args = new SessionConnectionStateChangedEventArgs(session.HostId, previousState, newState);
+            SessionConnectionStateChanged?.Invoke(this, args);
+
+            switch (newState)
+            {
+                case ConnectionState.Connecting:
+                    OnSessionConnecting(session);
+                    break;
+                case ConnectionState.Handshaking:
+                    OnSessionHandshaking(session);
+                    break;
+                case ConnectionState.Connected:
+                    OnSessionConnected(session);
+                    break;
+                case ConnectionState.Disconnected:
+                    OnSessionDisconnected(session);
+                    break;
+            }
         }
 
         public P2PGroup CreateP2PGroup()

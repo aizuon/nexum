@@ -1,5 +1,16 @@
 namespace Nexum.Core
 {
+    public enum ConnectionState : byte
+    {
+        Disconnected,
+
+        Connecting,
+
+        Handshaking,
+
+        Connected
+    }
+
     public enum ServerType : byte
     {
         Auth,
