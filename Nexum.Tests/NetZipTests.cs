@@ -22,8 +22,8 @@ namespace Nexum.Tests
             message.Write(data);
             var compressed = NetZip.CompressPacket(message);
             Assert.NotNull(compressed);
-            Assert.True(compressed.Length > 0);
-            Assert.True(compressed.Length < message.Length);
+            Assert.True(compressed.Length > 0, "Compressed data should not be empty");
+            Assert.True(compressed.Length < message.Length, "Compressed data should be smaller than original");
         }
 
         [Fact]
@@ -46,7 +46,7 @@ namespace Nexum.Tests
             var compressed = NetZip.CompressPacket(message);
             var messageType = MessageType.None;
             bool success = compressed.Read(ref messageType);
-            Assert.True(success);
+            Assert.True(success, "Should successfully read message type");
             Assert.Equal(MessageType.Compressed, messageType);
         }
 
@@ -64,10 +64,10 @@ namespace Nexum.Tests
             bool success1 = compressed.ReadScalar(ref compressedSize);
             bool success2 = compressed.ReadScalar(ref originalSize);
 
-            Assert.True(success1);
-            Assert.True(success2);
+            Assert.True(success1, "Should successfully read compressed size");
+            Assert.True(success2, "Should successfully read original size");
             Assert.Equal(message.Length, originalSize);
-            Assert.True(compressedSize > 0);
+            Assert.True(compressedSize > 0, "Compressed size should be greater than zero");
         }
 
         [Fact]
@@ -103,8 +103,8 @@ namespace Nexum.Tests
                 data[i] = 0;
             byte[] compressed = NetZip.CompressData(data);
             Assert.NotNull(compressed);
-            Assert.True(compressed.Length > 0);
-            Assert.True(compressed.Length < data.Length);
+            Assert.True(compressed.Length > 0, "Compressed data should not be empty");
+            Assert.True(compressed.Length < data.Length, "Compressed data should be smaller than original");
         }
 
         [Fact]
@@ -121,7 +121,7 @@ namespace Nexum.Tests
             byte[] data = new byte[] { 1, 2, 3, 4, 5 };
             byte[] compressed = NetZip.CompressData(data);
             Assert.NotNull(compressed);
-            Assert.True(compressed.Length > 0);
+            Assert.True(compressed.Length > 0, "Compressed small data should not be empty");
         }
 
         [Fact]
@@ -130,7 +130,7 @@ namespace Nexum.Tests
             var message = new NetMessage();
             var compressed = NetZip.CompressPacket(message);
             Assert.NotNull(compressed);
-            Assert.True(compressed.Length > 0);
+            Assert.True(compressed.Length > 0, "Compressed empty message should have header data");
         }
 
         [Fact]
@@ -171,7 +171,7 @@ namespace Nexum.Tests
             }
 
             var compressed = NetZip.CompressPacket(message);
-            Assert.True(compressed.Length < message.Length);
+            Assert.True(compressed.Length < message.Length, "Varying data should compress to smaller size");
         }
 
         [Fact]
@@ -184,7 +184,7 @@ namespace Nexum.Tests
             message.Write(data);
             var compressed = NetZip.CompressPacket(message);
             Assert.NotNull(compressed);
-            Assert.True(compressed.Length > 0);
+            Assert.True(compressed.Length > 0, "Random data compression should produce output");
         }
 
         [Fact]
@@ -231,7 +231,7 @@ namespace Nexum.Tests
             byte[] compressed = NetZip.CompressData(data);
 
             Assert.NotNull(compressed);
-            Assert.True(compressed.Length > 0);
+            Assert.True(compressed.Length > 0, "Compressed data with offset should not be empty");
         }
     }
 }

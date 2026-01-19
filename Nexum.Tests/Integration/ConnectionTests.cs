@@ -33,7 +33,7 @@ namespace Nexum.Tests.Integration
 
             var session = Server.Sessions.Values.First();
             Assert.Equal(client.HostId, session.HostId);
-            Assert.True(session.IsConnected);
+            Assert.True(session.IsConnected, "Session should be connected");
             Assert.Equal(Server.ServerGuid, client.ServerGuid);
 
             Assert.NotNull(client.NetSettings);

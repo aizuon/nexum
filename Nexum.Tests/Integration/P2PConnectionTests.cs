@@ -165,8 +165,8 @@ namespace Nexum.Tests.Integration
             var peer1 = client1.P2PGroup.P2PMembers[client2.HostId];
             var peer2 = client2.P2PGroup.P2PMembers[client1.HostId];
 
-            Assert.True(peer1.DirectP2P);
-            Assert.True(peer2.DirectP2P);
+            Assert.True(peer1.DirectP2P, "Peer1 should have direct P2P connection");
+            Assert.True(peer2.DirectP2P, "Peer2 should have direct P2P connection");
 
             int client1Received = 0;
             int client2Received = 0;
@@ -187,11 +187,11 @@ namespace Nexum.Tests.Integration
 
             var msg1 = new NetMessage();
             msg1.Write(333);
-            peer1.RmiToPeer(7003, msg1);
+            peer1.RmiToPeer(7003, msg1, reliable: true);
 
             var msg2 = new NetMessage();
             msg2.Write(444);
-            peer2.RmiToPeer(7004, msg2);
+            peer2.RmiToPeer(7004, msg2, reliable: true);
 
             Assert.True(client2Done.Wait(GetAdjustedTimeout(ConnectionTimeout)),
                 $"[{profileName}] Client2 should receive direct P2P message");

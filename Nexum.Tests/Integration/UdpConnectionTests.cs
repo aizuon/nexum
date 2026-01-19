@@ -33,7 +33,7 @@ namespace Nexum.Tests.Integration
             SetupNetworkSimulation(profile);
 
             Server = await CreateServerAsync(withUdp: true);
-            Assert.True(Server.UdpEnabled);
+            Assert.True(Server.UdpEnabled, "Server UDP should be enabled");
             Assert.Equal(UdpPorts.Length, Server.UdpSockets.Count);
 
             var client = await CreateClientAsync();
@@ -92,11 +92,11 @@ namespace Nexum.Tests.Integration
 
             var clientMsg = new NetMessage();
             clientMsg.Write(12345);
-            client.RmiToServerUdpIfAvailable(6001, clientMsg);
+            client.RmiToServerUdpIfAvailable(6001, clientMsg, reliable: true);
 
             var serverMsg = new NetMessage();
             serverMsg.Write(67890);
-            session.RmiToClientUdpIfAvailable(6002, serverMsg);
+            session.RmiToClientUdpIfAvailable(6002, serverMsg, reliable: true);
 
             Assert.True(clientToServerReceived.Wait(GetAdjustedTimeout(ConnectionTimeout)),
                 $"[{profileName}] Server should receive UDP message");
@@ -126,7 +126,7 @@ namespace Nexum.Tests.Integration
 
             var testMessage = new NetMessage();
             testMessage.Write(11111);
-            client.RmiToServerUdpIfAvailable(6004, testMessage);
+            client.RmiToServerUdpIfAvailable(6004, testMessage, reliable: true);
 
             Assert.True(messageReceived.Wait(ConnectionTimeout));
             Assert.Equal(11111, receivedValue);

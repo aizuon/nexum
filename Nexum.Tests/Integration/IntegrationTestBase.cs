@@ -317,12 +317,22 @@ namespace Nexum.Tests.Integration
 
             double multiplier = 1.0;
 
+            if (CurrentNetworkProfile.LatencyMs > 50)
+                multiplier += 0.5;
             if (CurrentNetworkProfile.LatencyMs > 100)
+                multiplier += 1.0;
+            if (CurrentNetworkProfile.JitterMs > 50)
+                multiplier += 0.5;
+            if (CurrentNetworkProfile.PacketLossRate > 0.01)
+                multiplier += 0.5;
+            if (CurrentNetworkProfile.PacketLossRate > 0.03)
+                multiplier += 0.5;
+            if (CurrentNetworkProfile.PacketLossRate > 0.05)
                 multiplier += 1.0;
             if (CurrentNetworkProfile.PacketLossRate > 0.1)
                 multiplier += 1.0;
-            if (CurrentNetworkProfile.PacketLossRate > 0.2)
-                multiplier += 1.0;
+            if (CurrentNetworkProfile.PacketReorderRate > 0.02)
+                multiplier += 0.5;
 
             return TimeSpan.FromTicks((long)(baseTimeout.Ticks * multiplier));
         }

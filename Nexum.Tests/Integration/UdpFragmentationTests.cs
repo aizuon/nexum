@@ -59,7 +59,7 @@ namespace Nexum.Tests.Integration
 
             var testMessage = new NetMessage();
             testMessage.Write(new ByteArray(largePayload));
-            client.RmiToServerUdpIfAvailable(7001, testMessage);
+            client.RmiToServerUdpIfAvailable(7001, testMessage, reliable: true);
 
             Assert.True(messageReceived.Wait(GetAdjustedTimeout(MessageTimeout)),
                 $"[{profileName}] Large payload should be received");
@@ -114,11 +114,11 @@ namespace Nexum.Tests.Integration
 
             var clientMsg = new NetMessage();
             clientMsg.Write(new ByteArray(clientPayload));
-            client.RmiToServerUdpIfAvailable(7002, clientMsg);
+            client.RmiToServerUdpIfAvailable(7002, clientMsg, reliable: true);
 
             var serverMsg = new NetMessage();
             serverMsg.Write(new ByteArray(serverPayload));
-            session.RmiToClientUdpIfAvailable(7003, serverMsg);
+            session.RmiToClientUdpIfAvailable(7003, serverMsg, reliable: true);
 
             Assert.True(serverReceived.Wait(GetAdjustedTimeout(MessageTimeout)),
                 $"[{profileName}] Server should receive fragmented message");

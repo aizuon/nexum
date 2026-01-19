@@ -170,7 +170,7 @@ namespace Nexum.Tests
             byte value = 0;
             bool success = byteArray.Read(ref value);
 
-            Assert.True(success);
+            Assert.True(success, "Read should succeed for valid byte data");
             Assert.Equal(42, value);
             Assert.Equal(1, byteArray.ReadOffset);
         }
@@ -187,10 +187,10 @@ namespace Nexum.Tests
             bool success1 = byteArray.Read(ref value1);
             bool success2 = byteArray.Read(ref value2);
 
-            Assert.True(success1);
-            Assert.True(success2);
-            Assert.True(value1);
-            Assert.False(value2);
+            Assert.True(success1, "First bool read should succeed");
+            Assert.True(success2, "Second bool read should succeed");
+            Assert.True(value1, "First bool value should be true");
+            Assert.False(value2, "Second bool value should be false");
         }
 
         [Fact]
@@ -203,7 +203,7 @@ namespace Nexum.Tests
             short value = 0;
             bool success = byteArray.Read(ref value);
 
-            Assert.True(success);
+            Assert.True(success, "Read should succeed for valid short data");
             Assert.Equal(expected, value);
         }
 
@@ -217,7 +217,7 @@ namespace Nexum.Tests
             int value = 0;
             bool success = byteArray.Read(ref value);
 
-            Assert.True(success);
+            Assert.True(success, "Read should succeed for valid int data");
             Assert.Equal(expected, value);
         }
 
@@ -231,7 +231,7 @@ namespace Nexum.Tests
             long value = 0;
             bool success = byteArray.Read(ref value);
 
-            Assert.True(success);
+            Assert.True(success, "Read should succeed for valid long data");
             Assert.Equal(expected, value);
         }
 
@@ -245,7 +245,7 @@ namespace Nexum.Tests
             float value = 0;
             bool success = byteArray.Read(ref value);
 
-            Assert.True(success);
+            Assert.True(success, "Read should succeed for valid float data");
             Assert.Equal(expected, value);
         }
 
@@ -259,7 +259,7 @@ namespace Nexum.Tests
             double value = 0;
             bool success = byteArray.Read(ref value);
 
-            Assert.True(success);
+            Assert.True(success, "Read should succeed for valid double data");
             Assert.Equal(expected, value);
         }
 
@@ -273,7 +273,7 @@ namespace Nexum.Tests
             long value = 0;
             bool success = byteArray.ReadScalar(ref value);
 
-            Assert.True(success);
+            Assert.True(success, "ReadScalar should succeed for valid scalar data");
             Assert.Equal(expected, value);
         }
 
@@ -287,7 +287,7 @@ namespace Nexum.Tests
             long value = 0;
             bool success = byteArray.ReadScalar(ref value);
 
-            Assert.True(success);
+            Assert.True(success, "ReadScalar should succeed for small values");
             Assert.Equal(expected, value);
         }
 
@@ -302,8 +302,8 @@ namespace Nexum.Tests
             bool success1 = byteArray.Read(ref value1);
             bool success2 = byteArray.Read(ref value2);
 
-            Assert.True(success1);
-            Assert.False(success2);
+            Assert.True(success1, "First read should succeed");
+            Assert.False(success2, "Second read should fail when buffer is exhausted");
         }
 
         [Fact]
@@ -315,7 +315,7 @@ namespace Nexum.Tests
 
             bool success = byteArray.ReadBytes(out byte[] result, 3);
 
-            Assert.True(success);
+            Assert.True(success, "ReadBytes should succeed for valid length");
             Assert.Equal(3, result.Length);
             Assert.Equal(1, result[0]);
             Assert.Equal(2, result[1]);
@@ -333,7 +333,7 @@ namespace Nexum.Tests
 
             bool success = byteArray.ReadAll(out byte[] result);
 
-            Assert.True(success);
+            Assert.True(success, "ReadAll should succeed when data is available");
             Assert.Equal(4, result.Length);
         }
 
@@ -405,7 +405,7 @@ namespace Nexum.Tests
             sbyte result = 0;
             bool success = byteArray.Read(ref result);
 
-            Assert.True(success);
+            Assert.True(success, "Read should succeed for sbyte data");
             Assert.Equal(value, result);
         }
 
@@ -421,7 +421,7 @@ namespace Nexum.Tests
             ushort result = 0;
             bool success = byteArray.Read(ref result);
 
-            Assert.True(success);
+            Assert.True(success, "Read should succeed for ushort data");
             Assert.Equal(value, result);
         }
 
@@ -437,7 +437,7 @@ namespace Nexum.Tests
             uint result = 0;
             bool success = byteArray.Read(ref result);
 
-            Assert.True(success);
+            Assert.True(success, "Read should succeed for uint data");
             Assert.Equal(value, result);
         }
 
@@ -453,7 +453,7 @@ namespace Nexum.Tests
             ulong result = 0;
             bool success = byteArray.Read(ref result);
 
-            Assert.True(success);
+            Assert.True(success, "Read should succeed for ulong data");
             Assert.Equal(value, result);
         }
 
@@ -467,7 +467,7 @@ namespace Nexum.Tests
             var result = new ByteArray();
             bool success = byteArray1.Read(ref result);
 
-            Assert.True(success);
+            Assert.True(success, "Read should succeed for ByteArray data");
             Assert.Equal(byteArray2.GetBuffer(), result.GetBuffer());
         }
 
@@ -483,7 +483,7 @@ namespace Nexum.Tests
             short result = 0;
             bool success = byteArray.Read(ref result);
 
-            Assert.True(success);
+            Assert.True(success, "Read should succeed for short boundary values");
             Assert.Equal(value, result);
         }
 
@@ -499,7 +499,7 @@ namespace Nexum.Tests
             int result = 0;
             bool success = byteArray.Read(ref result);
 
-            Assert.True(success);
+            Assert.True(success, "Read should succeed for int boundary values");
             Assert.Equal(value, result);
         }
 
@@ -515,7 +515,7 @@ namespace Nexum.Tests
             long result = 0;
             bool success = byteArray.Read(ref result);
 
-            Assert.True(success);
+            Assert.True(success, "Read should succeed for long boundary values");
             Assert.Equal(value, result);
         }
 
@@ -528,7 +528,7 @@ namespace Nexum.Tests
             long result = 0;
             bool success = byteArray.ReadScalar(ref result);
 
-            Assert.True(success);
+            Assert.True(success, "ReadScalar should succeed for negative values");
             Assert.Equal(-100L, result);
         }
 
@@ -540,7 +540,7 @@ namespace Nexum.Tests
             int value = 0;
             bool success = byteArray.Read(ref value);
 
-            Assert.False(success);
+            Assert.False(success, "Read should fail on empty buffer");
         }
 
         [Fact]
@@ -551,7 +551,7 @@ namespace Nexum.Tests
 
             bool success = byteArray.ReadBytes(out byte[] result, 10);
 
-            Assert.False(success);
+            Assert.False(success, "ReadBytes should fail when requested length exceeds available data");
         }
 
         private enum TestEnum

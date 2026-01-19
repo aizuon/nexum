@@ -17,9 +17,9 @@ namespace Nexum.Tests
         public void Constructor_Default_InitializesProperties()
         {
             var message = new NetMessage();
-            Assert.False(message.Compress);
+            Assert.False(message.Compress, "New message should not be compressed by default");
             Assert.Equal(EncryptMode.None, message.EncryptMode);
-            Assert.True(message.Reliable);
+            Assert.True(message.Reliable, "New message should be reliable by default");
             Assert.Equal(0u, message.RelayFrom);
         }
 
@@ -57,7 +57,7 @@ namespace Nexum.Tests
             {
                 EncryptMode = EncryptMode.Secure
             };
-            Assert.True(message.Encrypt);
+            Assert.True(message.Encrypt, "Encrypt should be true when EncryptMode is not None");
         }
 
         [Fact]
@@ -67,7 +67,7 @@ namespace Nexum.Tests
             {
                 EncryptMode = EncryptMode.None
             };
-            Assert.False(message.Encrypt);
+            Assert.False(message.Encrypt, "Encrypt should be false when EncryptMode is None");
         }
 
         [Fact]
@@ -89,7 +89,7 @@ namespace Nexum.Tests
             message.WriteEnum(expected);
             var result = MessageType.None;
             bool success = message.Read(ref result);
-            Assert.True(success);
+            Assert.True(success, "Should successfully read MessageType");
             Assert.Equal(expected, result);
         }
 
@@ -101,7 +101,7 @@ namespace Nexum.Tests
             message.Write(expected);
             string result = string.Empty;
             bool success = message.ReadString(ref result);
-            Assert.True(success);
+            Assert.True(success, "Should successfully read non-unicode string");
             Assert.Equal(expected, result);
         }
 
@@ -113,8 +113,8 @@ namespace Nexum.Tests
             message.Write(expected, true);
             string result = string.Empty;
             bool success = message.Read(ref result, out bool isUnicode);
-            Assert.True(success);
-            Assert.True(isUnicode);
+            Assert.True(success, "Should successfully read unicode string");
+            Assert.True(isUnicode, "String should be detected as unicode");
             Assert.Equal(expected, result);
         }
 
@@ -126,7 +126,7 @@ namespace Nexum.Tests
             message.Write(expected);
             string result = "not empty";
             bool success = message.ReadString(ref result);
-            Assert.True(success);
+            Assert.True(success, "Should successfully read empty string");
             Assert.Equal(expected, result);
         }
 
@@ -137,7 +137,7 @@ namespace Nexum.Tests
             var expected = Guid.NewGuid();
             message.Write(expected);
             bool success = message.Read(out Guid result);
-            Assert.True(success);
+            Assert.True(success, "Should successfully read Guid");
             Assert.Equal(expected, result);
         }
 
@@ -149,7 +149,7 @@ namespace Nexum.Tests
             message.Write(expected);
             var result = new Version();
             bool success = message.ReadVersion(ref result);
-            Assert.True(success);
+            Assert.True(success, "Should successfully read Version");
             Assert.Equal(expected, result);
         }
 
@@ -161,7 +161,7 @@ namespace Nexum.Tests
             message.Write(expected);
             IPEndPoint result = null;
             bool success = message.ReadIPEndPoint(ref result);
-            Assert.True(success);
+            Assert.True(success, "Should successfully read IPEndPoint");
             Assert.Equal(expected.Address, result.Address);
             Assert.Equal(expected.Port, result.Port);
         }
@@ -174,7 +174,7 @@ namespace Nexum.Tests
             message.WriteStringEndPoint(expected);
             IPEndPoint result = null;
             bool success = message.ReadStringEndPoint(ref result);
-            Assert.True(success);
+            Assert.True(success, "Should successfully read string-encoded IPEndPoint");
             Assert.Equal(expected.Address, result.Address);
             Assert.Equal(expected.Port, result.Port);
         }
@@ -214,14 +214,14 @@ namespace Nexum.Tests
         public void Reliable_DefaultIsTrue()
         {
             var message = new NetMessage();
-            Assert.True(message.Reliable);
+            Assert.True(message.Reliable, "Message should be reliable by default");
         }
 
         [Fact]
         public void Compress_DefaultIsFalse()
         {
             var message = new NetMessage();
-            Assert.False(message.Compress);
+            Assert.False(message.Compress, "Message should not be compressed by default");
         }
 
         [Fact]
@@ -247,7 +247,7 @@ namespace Nexum.Tests
         {
             var message = new NetMessage();
             message.Compress = true;
-            Assert.True(message.Compress);
+            Assert.True(message.Compress, "Compress should be settable to true");
         }
 
         [Fact]
@@ -255,7 +255,7 @@ namespace Nexum.Tests
         {
             var message = new NetMessage();
             message.Reliable = false;
-            Assert.False(message.Reliable);
+            Assert.False(message.Reliable, "Reliable should be settable to false");
         }
 
         [Fact]
@@ -280,9 +280,9 @@ namespace Nexum.Tests
             bool successInt = message.Read(out int resultInt);
             bool successString = message.Read(out string resultString);
             bool successBool = message.Read(out bool resultBool);
-            Assert.True(successInt);
-            Assert.True(successString);
-            Assert.True(successBool);
+            Assert.True(successInt, "Should successfully read int value");
+            Assert.True(successString, "Should successfully read string value");
+            Assert.True(successBool, "Should successfully read bool value");
             Assert.Equal(expectedInt, resultInt);
             Assert.Equal(expectedString, resultString);
             Assert.Equal(expectedBool, resultBool);
@@ -299,7 +299,7 @@ namespace Nexum.Tests
             int value = 0;
             bool success = message.Read(ref value);
 
-            Assert.False(success);
+            Assert.False(success, "Read should fail when buffer is exhausted");
         }
 
         [Fact]
@@ -310,7 +310,7 @@ namespace Nexum.Tests
 
             bool success = message.Read(out Guid result);
 
-            Assert.False(success);
+            Assert.False(success, "Read should fail with insufficient data for Guid");
         }
 
         [Fact]
@@ -323,7 +323,7 @@ namespace Nexum.Tests
             IPEndPoint result = null;
             bool success = message.ReadIPEndPoint(ref result);
 
-            Assert.True(success);
+            Assert.True(success, "Should successfully read loopback IPEndPoint");
             Assert.Equal(expected.Address, result.Address);
             Assert.Equal(expected.Port, result.Port);
         }
@@ -338,7 +338,7 @@ namespace Nexum.Tests
             string result = string.Empty;
             bool success = message.ReadString(ref result);
 
-            Assert.True(success);
+            Assert.True(success, "Should successfully read long string");
             Assert.Equal(expected, result);
         }
     }
