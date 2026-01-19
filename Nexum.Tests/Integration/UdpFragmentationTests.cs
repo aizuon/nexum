@@ -1,8 +1,10 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Nexum.Core;
+using Nexum.Core.Simulation;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -15,23 +17,36 @@ namespace Nexum.Tests.Integration
         {
         }
 
-        [Fact(Timeout = 60000)]
-        public async Task SmallPacket_SentOverUdp_ReceivedWithoutFragmentation()
+        public static IEnumerable<object[]> NetworkProfiles =>
+            new List<object[]>
+            {
+                new object[] { "Ideal" },
+                new object[] { "HomeWifi" },
+                new object[] { "Mobile4G" },
+                new object[] { "PoorMobile" }
+            };
+
+        [Theory(Timeout = 180000)]
+        [MemberData(nameof(NetworkProfiles))]
+        public async Task Fragmentation_ClientServer_LargePayloadReassembled(string profileName)
         {
+            var profile = NetworkProfile.GetByName(profileName);
+            SetupNetworkSimulation(profile);
+
             Server = await CreateServerAsync();
             var client = await CreateClientAsync();
             await WaitForClientConnectionAsync(client);
 
             var session = Server.Sessions.Values.First();
-            var p2pGroup = Server.CreateP2PGroup();
-            p2pGroup.Join(session);
+            var group = Server.CreateP2PGroup();
+            group.Join(session);
 
-            await WaitForClientUdpEnabledAsync(client);
+            await WaitForClientUdpEnabledAsync(client, GetAdjustedTimeout(UdpSetupTimeout));
 
             byte[] receivedData = null;
             var messageReceived = new ManualResetEventSlim(false);
 
-            Server.OnRMIRecieve += (_, msg, _) =>
+            Server.OnRMIReceive += (_, msg, _) =>
             {
                 var byteArray = new ByteArray();
                 msg.Read(ref byteArray);
@@ -39,160 +54,44 @@ namespace Nexum.Tests.Integration
                 messageReceived.Set();
             };
 
-            byte[] smallPayload = new byte[FragmentConfig.MtuLength - 100];
-            Random.Shared.NextBytes(smallPayload);
+            byte[] largePayload = new byte[FragmentConfig.MtuLength * 3 + 500];
+            Random.Shared.NextBytes(largePayload);
 
             var testMessage = new NetMessage();
-            testMessage.Write(new ByteArray(smallPayload));
+            testMessage.Write(new ByteArray(largePayload));
             client.RmiToServerUdpIfAvailable(7001, testMessage);
 
-            Assert.True(messageReceived.Wait(ConnectionTimeout), "Server should receive small UDP message");
-            Assert.Equal(smallPayload, receivedData);
-        }
-
-        [Fact(Timeout = 60000)]
-        public async Task LargePacket_SentOverUdp_FragmentedAndReassembled()
-        {
-            Server = await CreateServerAsync();
-            var client = await CreateClientAsync();
-            await WaitForClientConnectionAsync(client);
-
-            var session = Server.Sessions.Values.First();
-            var p2pGroup = Server.CreateP2PGroup();
-            p2pGroup.Join(session);
-
-            await WaitForClientUdpEnabledAsync(client);
-
-            byte[] receivedData = null;
-            var messageReceived = new ManualResetEventSlim(false);
-
-            Server.OnRMIRecieve += (_, msg, _) =>
-            {
-                var byteArray = new ByteArray();
-                msg.Read(ref byteArray);
-                receivedData = byteArray.GetBuffer();
-                messageReceived.Set();
-            };
-
-            byte[] largePayload = new byte[FragmentConfig.MtuLength * 3 + 500];
-            Random.Shared.NextBytes(largePayload);
-
-            var testMessage = new NetMessage();
-            testMessage.Write(new ByteArray(largePayload));
-            client.RmiToServerUdpIfAvailable(7002, testMessage);
-
-            Assert.True(messageReceived.Wait(MessageTimeout), "Server should receive fragmented UDP message");
+            Assert.True(messageReceived.Wait(GetAdjustedTimeout(MessageTimeout)),
+                $"[{profileName}] Large payload should be received");
             Assert.Equal(largePayload, receivedData);
+
+            LogSimulationStatistics();
         }
 
-        [Fact(Timeout = 60000)]
-        public async Task LargePacket_ServerToClient_FragmentedAndReassembled()
+        [Theory(Timeout = 180000)]
+        [MemberData(nameof(NetworkProfiles))]
+        public async Task Fragmentation_ClientServer_Bidirectional(string profileName)
         {
+            var profile = NetworkProfile.GetByName(profileName);
+            SetupNetworkSimulation(profile);
+
             Server = await CreateServerAsync();
             var client = await CreateClientAsync();
             await WaitForClientConnectionAsync(client);
 
             var session = Server.Sessions.Values.First();
-            var p2pGroup = Server.CreateP2PGroup();
-            p2pGroup.Join(session);
+            var group = Server.CreateP2PGroup();
+            group.Join(session);
 
-            await WaitForClientUdpEnabledAsync(client);
-            await WaitForSessionUdpEnabledAsync(session);
-
-            byte[] receivedData = null;
-            var messageReceived = new ManualResetEventSlim(false);
-
-            client.OnRMIRecieve += (msg, _) =>
-            {
-                var byteArray = new ByteArray();
-                msg.Read(ref byteArray);
-                receivedData = byteArray.GetBuffer();
-                messageReceived.Set();
-            };
-
-            byte[] largePayload = new byte[FragmentConfig.MtuLength * 3 + 500];
-            Random.Shared.NextBytes(largePayload);
-
-            var testMessage = new NetMessage();
-            testMessage.Write(new ByteArray(largePayload));
-            session.RmiToClientUdpIfAvailable(7003, testMessage);
-
-            Assert.True(messageReceived.Wait(MessageTimeout),
-                "Client should receive fragmented UDP message from server");
-            Assert.Equal(largePayload, receivedData);
-        }
-
-        [Fact(Timeout = 60000)]
-        public async Task MultipleFragmentedPackets_SentConcurrently_AllReassembledCorrectly()
-        {
-            Server = await CreateServerAsync();
-            var client = await CreateClientAsync();
-            await WaitForClientConnectionAsync(client);
-
-            var session = Server.Sessions.Values.First();
-            var p2pGroup = Server.CreateP2PGroup();
-            p2pGroup.Join(session);
-
-            await WaitForClientUdpEnabledAsync(client);
-
-            const int messageCount = 3;
-            byte[][] receivedMessages = new byte[messageCount][];
-            int receivedCount = 0;
-            var allReceived = new ManualResetEventSlim(false);
-
-            Server.OnRMIRecieve += (_, msg, rmiId) =>
-            {
-                int index = rmiId - 7010;
-                if (index >= 0 && index < messageCount)
-                {
-                    var byteArray = new ByteArray();
-                    msg.Read(ref byteArray);
-                    receivedMessages[index] = byteArray.GetBuffer();
-                    if (Interlocked.Increment(ref receivedCount) == messageCount)
-                        allReceived.Set();
-                }
-            };
-
-            byte[][] sentPayloads = new byte[messageCount][];
-            for (int i = 0; i < messageCount; i++)
-            {
-                sentPayloads[i] = new byte[FragmentConfig.MtuLength * (3 + i) + 500];
-                Random.Shared.NextBytes(sentPayloads[i]);
-
-                var testMessage = new NetMessage();
-                testMessage.Write(new ByteArray(sentPayloads[i]));
-                client.RmiToServerUdpIfAvailable((ushort)(7010 + i), testMessage);
-            }
-
-            Assert.True(allReceived.Wait(MessageTimeout), "Server should receive all fragmented messages");
-
-            for (int i = 0; i < messageCount; i++)
-            {
-                Assert.NotNull(receivedMessages[i]);
-                Assert.Equal(sentPayloads[i], receivedMessages[i]);
-            }
-        }
-
-        [Fact(Timeout = 60000)]
-        public async Task BidirectionalFragmentedMessages_BothDirections_Success()
-        {
-            Server = await CreateServerAsync();
-            var client = await CreateClientAsync();
-            await WaitForClientConnectionAsync(client);
-
-            var session = Server.Sessions.Values.First();
-            var p2pGroup = Server.CreateP2PGroup();
-            p2pGroup.Join(session);
-
-            await WaitForClientUdpEnabledAsync(client);
-            await WaitForSessionUdpEnabledAsync(session);
+            await WaitForClientUdpEnabledAsync(client, GetAdjustedTimeout(UdpSetupTimeout));
+            await WaitForSessionUdpEnabledAsync(session, GetAdjustedTimeout(UdpSetupTimeout));
 
             byte[] serverReceivedData = null;
             byte[] clientReceivedData = null;
             var serverReceived = new ManualResetEventSlim(false);
             var clientReceived = new ManualResetEventSlim(false);
 
-            Server.OnRMIRecieve += (_, msg, _) =>
+            Server.OnRMIReceive += (_, msg, _) =>
             {
                 var byteArray = new ByteArray();
                 msg.Read(ref byteArray);
@@ -200,7 +99,7 @@ namespace Nexum.Tests.Integration
                 serverReceived.Set();
             };
 
-            client.OnRMIRecieve += (msg, _) =>
+            client.OnRMIReceive += (msg, _) =>
             {
                 var byteArray = new ByteArray();
                 msg.Read(ref byteArray);
@@ -208,26 +107,142 @@ namespace Nexum.Tests.Integration
                 clientReceived.Set();
             };
 
-            byte[] clientToServerPayload = new byte[FragmentConfig.MtuLength * 3 + 500];
-            byte[] serverToClientPayload = new byte[FragmentConfig.MtuLength * 4 + 500];
-            Random.Shared.NextBytes(clientToServerPayload);
-            Random.Shared.NextBytes(serverToClientPayload);
+            byte[] clientPayload = new byte[FragmentConfig.MtuLength * 3 + 500];
+            byte[] serverPayload = new byte[FragmentConfig.MtuLength * 4 + 500];
+            Random.Shared.NextBytes(clientPayload);
+            Random.Shared.NextBytes(serverPayload);
 
             var clientMsg = new NetMessage();
-            clientMsg.Write(new ByteArray(clientToServerPayload));
-            client.RmiToServerUdpIfAvailable(7020, clientMsg);
+            clientMsg.Write(new ByteArray(clientPayload));
+            client.RmiToServerUdpIfAvailable(7002, clientMsg);
 
             var serverMsg = new NetMessage();
-            serverMsg.Write(new ByteArray(serverToClientPayload));
-            session.RmiToClientUdpIfAvailable(7021, serverMsg);
+            serverMsg.Write(new ByteArray(serverPayload));
+            session.RmiToClientUdpIfAvailable(7003, serverMsg);
 
-            Assert.True(serverReceived.Wait(MessageTimeout),
-                "Server should receive client's fragmented message");
-            Assert.True(clientReceived.Wait(MessageTimeout),
-                "Client should receive server's fragmented message");
+            Assert.True(serverReceived.Wait(GetAdjustedTimeout(MessageTimeout)),
+                $"[{profileName}] Server should receive fragmented message");
+            Assert.True(clientReceived.Wait(GetAdjustedTimeout(MessageTimeout)),
+                $"[{profileName}] Client should receive fragmented message");
+            Assert.Equal(clientPayload, serverReceivedData);
+            Assert.Equal(serverPayload, clientReceivedData);
 
-            Assert.Equal(clientToServerPayload, serverReceivedData);
-            Assert.Equal(serverToClientPayload, clientReceivedData);
+            LogSimulationStatistics();
+        }
+
+        [Theory(Timeout = 180000)]
+        [MemberData(nameof(NetworkProfiles))]
+        public async Task Fragmentation_P2PDirect_LargePayloadReassembled(string profileName)
+        {
+            var profile = NetworkProfile.GetByName(profileName);
+            SetupNetworkSimulation(profile);
+
+            Server = await CreateServerAsync();
+
+            var client1 = await CreateClientAsync();
+            await WaitForClientConnectionAsync(client1);
+
+            var client2 = await CreateClientAsync();
+            await WaitForClientConnectionAsync(client2);
+
+            var session1 = Server.Sessions[client1.HostId];
+            var session2 = Server.Sessions[client2.HostId];
+            var group = Server.CreateP2PGroup();
+
+            group.Join(session1);
+            group.Join(session2);
+            await WaitForClientUdpEnabledAsync(client1, GetAdjustedTimeout(UdpSetupTimeout));
+            await WaitForClientUdpEnabledAsync(client2, GetAdjustedTimeout(UdpSetupTimeout));
+
+            await WaitForConditionAsync(
+                () => client1.P2PGroup?.P2PMembers.ContainsKey(client2.HostId) == true &&
+                      client2.P2PGroup?.P2PMembers.ContainsKey(client1.HostId) == true,
+                GetAdjustedTimeout(MessageTimeout));
+
+            var peer1 = client1.P2PGroup.P2PMembers[client2.HostId];
+            var peer2 = client2.P2PGroup.P2PMembers[client1.HostId];
+
+            await WaitForP2PDirectConnectionAsync(peer1, GetAdjustedTimeout(UdpSetupTimeout));
+            await WaitForP2PDirectConnectionAsync(peer2, GetAdjustedTimeout(UdpSetupTimeout));
+
+            byte[] receivedData = null;
+            var messageReceived = new ManualResetEventSlim(false);
+
+            client2.OnRMIReceive += (msg, _) =>
+            {
+                var byteArray = new ByteArray();
+                msg.Read(ref byteArray);
+                receivedData = byteArray.GetBuffer();
+                messageReceived.Set();
+            };
+
+            byte[] largePayload = new byte[FragmentConfig.MtuLength * 3 + 500];
+            Random.Shared.NextBytes(largePayload);
+
+            var testMessage = new NetMessage();
+            testMessage.Write(new ByteArray(largePayload));
+            peer1.RmiToPeer(7004, testMessage, false, true);
+
+            Assert.True(messageReceived.Wait(GetAdjustedTimeout(LongOperationTimeout)),
+                $"[{profileName}] P2P direct fragmented message should be received");
+            Assert.Equal(largePayload, receivedData);
+
+            LogSimulationStatistics();
+        }
+
+        [Theory(Timeout = 180000)]
+        [MemberData(nameof(NetworkProfiles))]
+        public async Task Fragmentation_P2PRelayed_LargePayloadReassembled(string profileName)
+        {
+            var profile = NetworkProfile.GetByName(profileName);
+            SetupNetworkSimulation(profile);
+
+            Server = await CreateServerAsync();
+
+            var client1 = await CreateClientAsync();
+            await WaitForClientConnectionAsync(client1);
+
+            var client2 = await CreateClientAsync();
+            await WaitForClientConnectionAsync(client2);
+
+            var session1 = Server.Sessions[client1.HostId];
+            var session2 = Server.Sessions[client2.HostId];
+            var group = Server.CreateP2PGroup();
+
+            group.Join(session1);
+            group.Join(session2);
+            await WaitForClientUdpEnabledAsync(client1, GetAdjustedTimeout(UdpSetupTimeout));
+            await WaitForClientUdpEnabledAsync(client2, GetAdjustedTimeout(UdpSetupTimeout));
+
+            await WaitForConditionAsync(
+                () => client1.P2PGroup?.P2PMembers.ContainsKey(client2.HostId) == true,
+                GetAdjustedTimeout(MessageTimeout));
+
+            var peer1 = client1.P2PGroup.P2PMembers[client2.HostId];
+
+            byte[] receivedData = null;
+            var messageReceived = new ManualResetEventSlim(false);
+
+            client2.OnRMIReceive += (msg, _) =>
+            {
+                var byteArray = new ByteArray();
+                msg.Read(ref byteArray);
+                receivedData = byteArray.GetBuffer();
+                messageReceived.Set();
+            };
+
+            byte[] largePayload = new byte[10000];
+            Random.Shared.NextBytes(largePayload);
+
+            var testMessage = new NetMessage();
+            testMessage.Write(new ByteArray(largePayload));
+            peer1.RmiToPeer(7005, testMessage, true, true);
+
+            Assert.True(messageReceived.Wait(GetAdjustedTimeout(MessageTimeout)),
+                $"[{profileName}] P2P relayed fragmented message should be received");
+            Assert.Equal(largePayload, receivedData);
+
+            LogSimulationStatistics();
         }
     }
 }

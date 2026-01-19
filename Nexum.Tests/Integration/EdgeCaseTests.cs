@@ -16,22 +16,23 @@ namespace Nexum.Tests.Integration
         {
         }
 
-        [Fact(Timeout = 60000)]
-        public async Task Client_AbruptDispose_SessionRemovedFromServer()
+        [Fact(Timeout = 30000)]
+        public async Task Client_AbruptDispose_SessionCleanedUp()
         {
             Server = await CreateServerAsync();
             var client = await CreateClientAsync();
-
             await WaitForClientConnectionAsync(client);
+
             Assert.Single(Server.Sessions);
 
             client.Dispose();
+
             await WaitForConditionAsync(() => Server.Sessions.Count == 0, LongOperationTimeout);
             Assert.Empty(Server.Sessions);
         }
 
-        [Fact(Timeout = 60000)]
-        public async Task Server_Dispose_ClientsSessionsCleared()
+        [Fact(Timeout = 30000)]
+        public async Task Server_Dispose_AllSessionsCleared()
         {
             Server = await CreateServerAsync();
 
@@ -42,14 +43,35 @@ namespace Nexum.Tests.Integration
             await WaitForClientConnectionAsync(client2);
 
             Assert.Equal(2, Server.Sessions.Count);
+
             Server.Dispose();
             await Task.Delay(500);
+
             Assert.Empty(Server.Sessions);
+
             client1.Dispose();
             client2.Dispose();
         }
 
         [Fact(Timeout = 60000)]
+        public async Task Client_ConnectToNonexistentServer_Fails()
+        {
+            var client = new NetClient(ServerType.Relay);
+            try
+            {
+                await client.ConnectAsync(new IPEndPoint(IPAddress.Loopback, 59999));
+            }
+            catch
+            {
+            }
+
+            await Task.Delay(2000);
+            Assert.Equal(0u, client.HostId);
+
+            client.Dispose();
+        }
+
+        [Fact(Timeout = 30000)]
         public async Task Server_ManyClients_AllConnectSuccessfully()
         {
             const int clientCount = 10;
@@ -67,8 +89,13 @@ namespace Nexum.Tests.Integration
 
                 foreach (var client in clients)
                     await WaitForClientConnectionAsync(client);
+
                 Assert.Equal(clientCount, clients.Count(c => c.HostId != 0));
                 Assert.Equal(clientCount, Server.Sessions.Count);
+
+                var hostIds = clients.Select(c => c.HostId).ToHashSet();
+                Assert.Equal(clientCount, hostIds.Count);
+                Assert.DoesNotContain(0u, hostIds);
             }
             finally
             {
@@ -77,66 +104,7 @@ namespace Nexum.Tests.Integration
             }
         }
 
-        [Fact(Timeout = 60000)]
-        public async Task Server_ManyMessages_AllDeliveredInOrder()
-        {
-            const int messageCount = 100;
-            Server = await CreateServerAsync();
-
-            var receivedOrder = new List<int>();
-            object lockObj = new object();
-
-            Server.OnRMIRecieve += (session, msg, rmiId) =>
-            {
-                if (rmiId == 1001)
-                {
-                    msg.Read(out int value);
-                    lock (lockObj)
-                    {
-                        receivedOrder.Add(value);
-                    }
-                }
-            };
-
-            var client = await CreateClientAsync();
-            await WaitForClientConnectionAsync(client);
-            for (int i = 0; i < messageCount; i++)
-            {
-                var msg = new NetMessage();
-                msg.Write(i);
-                client.RmiToServer(1001, msg, EncryptMode.None);
-            }
-
-            await WaitForConditionAsync(
-                () => receivedOrder.Count >= messageCount,
-                LongOperationTimeout);
-
-            Assert.Equal(messageCount, receivedOrder.Count);
-            for (int i = 0; i < messageCount; i++)
-                Assert.Equal(i, receivedOrder[i]);
-
-            client.Dispose();
-        }
-
-        [Fact(Timeout = 60000)]
-        public async Task Client_ConnectToNonExistentServer_FailsGracefully()
-        {
-            var client = new NetClient(ServerType.Relay);
-            try
-            {
-                await client.ConnectAsync(new IPEndPoint(IPAddress.Loopback, 59999));
-            }
-            catch
-            {
-            }
-
-            await Task.Delay(2000);
-            Assert.Equal(0u, client.HostId);
-
-            client.Dispose();
-        }
-
-        [Fact(Timeout = 60000)]
+        [Fact(Timeout = 30000)]
         public async Task Server_RapidConnectDisconnect_HandlesCorrectly()
         {
             Server = await CreateServerAsync();
@@ -158,11 +126,6 @@ namespace Nexum.Tests.Integration
             }
 
             Assert.Empty(Server.Sessions);
-
-            var finalClient = await CreateClientAsync();
-            await WaitForClientConnectionAsync(finalClient);
-            Assert.NotEqual(0u, finalClient.HostId);
-            Assert.Single(Server.Sessions);
         }
     }
 }

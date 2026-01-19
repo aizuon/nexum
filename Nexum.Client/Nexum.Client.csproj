@@ -16,8 +16,8 @@
         </AssemblyAttribute>
     </ItemGroup>
     <ItemGroup>
-        <ProjectReference Include="..\BaseLib\BaseLib.csproj" />
-        <ProjectReference Include="..\Nexum.Core\Nexum.Core.csproj" />
+        <ProjectReference Include="..\BaseLib\BaseLib.csproj"/>
+        <ProjectReference Include="..\Nexum.Core\Nexum.Core.csproj"/>
     </ItemGroup>
     <ItemGroup>
         <PackageReference Include="BouncyCastle.Cryptography">

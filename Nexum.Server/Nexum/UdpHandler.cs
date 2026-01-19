@@ -5,14 +5,14 @@ using System.Threading.Tasks;
 using DotNetty.Transport.Channels;
 using Nexum.Core;
 using Serilog;
-using SerilogConstants = Serilog.Core.Constants;
+using Constants = Serilog.Core.Constants;
 
 namespace Nexum.Server
 {
-    internal class UdpHandler : ChannelHandlerAdapter
+    internal sealed class UdpHandler : ChannelHandlerAdapter
     {
         internal static readonly ILogger
-            Logger = Log.ForContext(SerilogConstants.SourceContextPropertyName, nameof(UdpHandler));
+            Logger = Log.ForContext(Constants.SourceContextPropertyName, nameof(UdpHandler));
 
         private static readonly Stopwatch Stopwatch = Stopwatch.StartNew();
 
@@ -98,20 +98,12 @@ namespace Nexum.Server
 
                 session2.NexumToClientUdpIfAvailable(serverHolepunchAck, true);
                 var capturedSession = session2;
-                Task.Run(async () =>
-                {
-                    for (int i = 0; i < HolepunchConstants.BurstCount; i++)
-                    {
-                        await Task.Delay(HolepunchConstants.BurstDelayMs);
-
-                        var burstAck = new NetMessage();
-                        burstAck.WriteEnum(MessageType.ServerHolepunchAck);
-                        burstAck.Write(capturedSession.HolepunchMagicNumber);
-                        burstAck.Write(capturedSession.UdpEndPoint);
-
-                        capturedSession.NexumToClientUdpIfAvailable(burstAck, true);
-                    }
-                });
+                HolepunchHelper.SendBurstMessagesWithCheck(
+                    () => HolepunchHelper.CreateServerHolepunchAckMessage(
+                        capturedSession.HolepunchMagicNumber, capturedSession.UdpEndPoint),
+                    msg => capturedSession.NexumToClientUdpIfAvailable(msg, true),
+                    () => !capturedSession.UdpEnabled
+                );
                 message.Content.Release();
                 return;
             }

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net;
 using DotNetty.Buffers;
@@ -14,6 +15,9 @@ namespace Nexum.Server
     {
         private readonly Stopwatch _stopwatch = Stopwatch.StartNew();
 
+        internal readonly ConcurrentQueue<PendingPeerHolepunchRequest> PendingPeerHolepunchRequests =
+            new ConcurrentQueue<PendingPeerHolepunchRequest>();
+
         internal volatile bool IsDisposed;
 
         internal NetSession(ServerType serverType, uint hostId, IChannel channel)
@@ -27,6 +31,8 @@ namespace Nexum.Server
             LocalEndPoint = new IPEndPoint(localEndPoint.Address.MapToIPv4(), localEndPoint.Port);
 
             UdpDefragBoard = new UdpPacketDefragBoard { LocalHostId = (uint)Core.HostId.Server };
+
+            UdpFragBoard.DefragBoard = UdpDefragBoard;
 
             Logger = Log.ForContext("HostId", HostId).ForContext("EndPoint", RemoteEndPoint.Address.ToString())
                 .ForContext(Constants.SourceContextPropertyName, serverType + "Session");
@@ -107,7 +113,7 @@ namespace Nexum.Server
             Crypt?.Dispose();
             Crypt = null;
 
-            Channel?.CloseAsync().Wait();
+            Channel?.CloseAsync();
             Channel = null;
         }
 
@@ -138,6 +144,15 @@ namespace Nexum.Server
         {
             var msg = ReliableUdpHelper.BuildFrameMessage(frame);
             ToClientUdp(msg);
+        }
+
+        internal void ResetToClientReliableUdp()
+        {
+            if (ToClientReliableUdp != null)
+            {
+                ToClientReliableUdp.OnFailed -= OnToClientReliableUdpFailed;
+                ToClientReliableUdp = null;
+            }
         }
 
         private void OnToClientReliableUdpFailed()

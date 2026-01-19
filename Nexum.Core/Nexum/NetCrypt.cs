@@ -8,7 +8,7 @@ using Org.BouncyCastle.Crypto.Parameters;
 
 namespace Nexum.Core
 {
-    internal class NetCrypt : IDisposable
+    internal sealed class NetCrypt : IDisposable
     {
         internal const int DefaultKeyLength = 256;
         internal const int DefaultFastKeyLength = 512;
@@ -84,7 +84,8 @@ namespace Nexum.Core
                 var cipher = new PaddedBufferedBlockCipher(new AesEngine(), new Pkcs7Padding());
                 cipher.Init(true, _aesKey);
 
-                byte[] output = new byte[cipher.GetOutputSize(key.Length)];
+                int outputSize = cipher.GetOutputSize(key.Length);
+                byte[] output = GC.AllocateUninitializedArray<byte>(outputSize);
                 int len = cipher.ProcessBytes(key, 0, key.Length, output, 0);
                 len += cipher.DoFinal(output, len);
 
@@ -107,7 +108,8 @@ namespace Nexum.Core
                 var cipher = new PaddedBufferedBlockCipher(new AesEngine(), new Pkcs7Padding());
                 cipher.Init(false, _aesKey);
 
-                byte[] output = new byte[cipher.GetOutputSize(encryptedKey.Length)];
+                int outputSize = cipher.GetOutputSize(encryptedKey.Length);
+                byte[] output = GC.AllocateUninitializedArray<byte>(outputSize);
                 int len = cipher.ProcessBytes(encryptedKey, 0, encryptedKey.Length, output, 0);
                 len += cipher.DoFinal(output, len);
 

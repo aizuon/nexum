@@ -6,13 +6,29 @@ using DotNetty.Buffers;
 
 namespace Nexum.Core
 {
-    internal class UdpPacketFragBoard
+    internal sealed class UdpPacketFragBoard
     {
         private uint _currentPacketId;
 
         public UdpPacketFragBoard()
         {
             _currentPacketId = (uint)Random.Shared.Next();
+        }
+
+        public MtuDiscovery MtuDiscovery { get; set; }
+
+        public UdpPacketDefragBoard DefragBoard { get; set; }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private int GetEffectiveMtu()
+        {
+            if (MtuDiscovery != null)
+                return MtuDiscovery.ConfirmedMtu;
+
+            if (DefragBoard != null)
+                return DefragBoard.InferredMtu;
+
+            return FragmentConfig.MtuLength;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -28,7 +44,9 @@ namespace Nexum.Core
             if (payloadLength <= 0)
                 yield break;
 
-            if (payloadLength <= FragmentConfig.MtuLength)
+            int mtuLength = GetEffectiveMtu();
+
+            if (payloadLength <= mtuLength)
             {
                 yield return new UdpMessage
                 {
@@ -48,7 +66,7 @@ namespace Nexum.Core
 
             while (offset < payloadLength)
             {
-                int fragmentPayloadSize = Math.Min(FragmentConfig.MtuLength, payloadLength - offset);
+                int fragmentPayloadSize = Math.Min(mtuLength, payloadLength - offset);
 
                 yield return new UdpMessage
                 {
@@ -68,19 +86,31 @@ namespace Nexum.Core
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static int GetFragmentCount(int payloadLength)
         {
+            return GetFragmentCount(payloadLength, FragmentConfig.MtuLength);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static int GetFragmentCount(int payloadLength, int mtuLength)
+        {
             if (payloadLength <= 0)
                 return 0;
 
-            if (payloadLength <= FragmentConfig.MtuLength)
+            if (payloadLength <= mtuLength)
                 return 1;
 
-            return (payloadLength - 1) / FragmentConfig.MtuLength + 1;
+            return (payloadLength - 1) / mtuLength + 1;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool RequiresFragmentation(int payloadLength)
         {
             return payloadLength > FragmentConfig.MtuLength;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static bool RequiresFragmentation(int payloadLength, int mtuLength)
+        {
+            return payloadLength > mtuLength;
         }
     }
 }

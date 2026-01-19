@@ -3,7 +3,7 @@ using System.Runtime.CompilerServices;
 
 namespace Nexum.Core
 {
-    internal class ReliableUdpFrame
+    internal sealed class ReliableUdpFrame
     {
         public ReliableUdpFrame()
         {

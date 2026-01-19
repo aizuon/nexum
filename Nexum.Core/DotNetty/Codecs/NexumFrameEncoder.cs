@@ -6,7 +6,7 @@ using Nexum.Core;
 
 namespace NexumCore.DotNetty.Codecs
 {
-    internal class NexumFrameEncoder : MessageToMessageEncoder<IByteBuffer>
+    internal sealed class NexumFrameEncoder : MessageToMessageEncoder<IByteBuffer>
     {
         protected override void Encode(IChannelHandlerContext context, IByteBuffer message, List<object> output)
         {

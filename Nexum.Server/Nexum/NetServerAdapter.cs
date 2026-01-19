@@ -7,7 +7,7 @@ using Constants = Serilog.Core.Constants;
 
 namespace Nexum.Server
 {
-    internal class NetServerAdapter : ChannelHandlerAdapter
+    internal sealed class NetServerAdapter : ChannelHandlerAdapter
     {
         internal readonly ILogger Logger;
         internal readonly NetServer Owner;

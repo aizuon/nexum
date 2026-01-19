@@ -4,7 +4,7 @@ using System.Runtime.CompilerServices;
 
 namespace Nexum.Core
 {
-    internal class ReliableUdpSender
+    internal sealed class ReliableUdpSender
     {
         private readonly List<SenderFrame> _firstSenderWindow = new List<SenderFrame>(32);
         private readonly ReliableUdpHost _owner;
@@ -165,7 +165,7 @@ namespace Nexum.Core
                 SendOneFrame(frame);
 
                 if (!isReliableChannel)
-                    _resendWindow.Insert(0, frame);
+                    _resendWindow.Add(frame);
 
                 _firstSenderWindow.RemoveAt(i);
             }
@@ -188,7 +188,8 @@ namespace Nexum.Core
             int maxResends = Math.Max(1, (int)resendLimit);
             bool isReliableChannel = _owner.IsReliableChannel();
 
-            for (int i = _resendWindow.Count - 1; i >= 0 && maxResends > 0; i--)
+            int count = _resendWindow.Count;
+            for (int i = 0; i < count && maxResends > 0; i++)
             {
                 var frame = _resendWindow[i];
 
@@ -205,7 +206,11 @@ namespace Nexum.Core
                     SendOneFrame(frame);
 
                     if (isReliableChannel)
+                    {
                         _resendWindow.RemoveAt(i);
+                        i--;
+                        count--;
+                    }
 
                     maxResends--;
                 }

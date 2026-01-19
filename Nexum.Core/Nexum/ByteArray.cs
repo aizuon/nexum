@@ -68,6 +68,35 @@ namespace Nexum.Core
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void Write(ReadOnlySpan<byte> obj)
+        {
+            EnsureCapacity(WriteOffset + obj.Length);
+            obj.CopyTo(_buffer.AsSpan(WriteOffset));
+            WriteOffset += obj.Length;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void WriteZeroes(int count)
+        {
+            if (count <= 0)
+                return;
+
+            EnsureCapacity(WriteOffset + count);
+            Array.Clear(_buffer, WriteOffset, count);
+            WriteOffset += count;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public bool Skip(int count)
+        {
+            if (ReadOffset + count > Length)
+                return false;
+
+            ReadOffset += count;
+            return true;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private void EnsureCapacity(int requiredCapacity)
         {
             if (_buffer.Length < requiredCapacity)
@@ -79,16 +108,19 @@ namespace Nexum.Core
             }
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void WriteScalar(byte obj)
         {
             WriteScalar((long)obj);
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void WriteScalar(short obj)
         {
             WriteScalar((long)obj);
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void WriteScalar(int obj)
         {
             WriteScalar((long)obj);
@@ -118,6 +150,7 @@ namespace Nexum.Core
             }
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void Write(bool obj)
         {
             if (obj)
@@ -133,6 +166,7 @@ namespace Nexum.Core
             _buffer[WriteOffset++] = obj;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void Write(sbyte obj)
         {
             Write((byte)obj);
@@ -257,7 +291,7 @@ namespace Nexum.Core
         public bool ReadAll(out byte[] obj)
         {
             int length = _buffer.Length - ReadOffset;
-            obj = new byte[length];
+            obj = GC.AllocateUninitializedArray<byte>(length);
 
             return Read(ref obj, length);
         }
@@ -435,6 +469,7 @@ namespace Nexum.Core
             Buffer.BlockCopy(bytes, 0, _buffer, offset, bytes.Length);
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void WriteRaw<T>(T obj) where T : struct
         {
             int length = Unsafe.SizeOf<T>();
@@ -443,6 +478,7 @@ namespace Nexum.Core
             WriteOffset += length;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public T ReadRaw<T>() where T : struct
         {
             int size = Unsafe.SizeOf<T>();

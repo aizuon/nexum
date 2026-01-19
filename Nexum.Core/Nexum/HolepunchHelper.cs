@@ -87,16 +87,17 @@ namespace Nexum.Core
         internal static void SendBurstMessages(
             Func<NetMessage> messageFactory,
             Action<NetMessage> sendAction,
-            int delayMs = HolepunchConstants.BurstDelayMs,
-            int burstCount = HolepunchConstants.BurstCount)
+            int delayMs = HolepunchConfig.BurstDelayMs,
+            int burstCount = HolepunchConfig.BurstCount)
         {
             Task.Run(async () =>
             {
                 for (int i = 0; i < burstCount; i++)
                 {
-                    await Task.Delay(delayMs);
                     var msg = messageFactory();
                     sendAction(msg);
+                    if (i < burstCount - 1)
+                        await Task.Delay(delayMs);
                 }
             });
         }
@@ -105,18 +106,19 @@ namespace Nexum.Core
             Func<NetMessage> messageFactory,
             Action<NetMessage> sendAction,
             Func<bool> shouldContinue,
-            int delayMs = HolepunchConstants.BurstDelayMs,
-            int burstCount = HolepunchConstants.BurstCount)
+            int delayMs = HolepunchConfig.BurstDelayMs,
+            int burstCount = HolepunchConfig.BurstCount)
         {
             Task.Run(async () =>
             {
                 for (int i = 0; i < burstCount; i++)
                 {
-                    await Task.Delay(delayMs);
                     if (!shouldContinue())
                         return;
                     var msg = messageFactory();
                     sendAction(msg);
+                    if (i < burstCount - 1)
+                        await Task.Delay(delayMs);
                 }
             });
         }
@@ -124,25 +126,32 @@ namespace Nexum.Core
         internal static async Task<bool> WaitForConditionWithBackoffAsync(
             Func<bool> condition,
             Func<bool> cancellationCheck,
-            int maxAttempts = HolepunchConstants.MaxSocketWaitAttempts,
-            int initialDelayMs = HolepunchConstants.InitialBackoffDelayMs,
-            int maxDelayMs = HolepunchConstants.MaxBackoffDelayMs)
+            int maxAttempts = HolepunchConfig.MaxSocketWaitAttempts,
+            int initialDelayMs = HolepunchConfig.InitialBackoffDelayMs,
+            int maxDelayMs = HolepunchConfig.MaxBackoffDelayMs)
         {
+            if (cancellationCheck())
+                return false;
+
+            if (condition())
+                return true;
+
             int delayMs = initialDelayMs;
 
             for (int i = 0; i < maxAttempts; i++)
             {
+                await Task.Delay(delayMs);
+
                 if (cancellationCheck())
                     return false;
 
                 if (condition())
                     return true;
 
-                await Task.Delay(delayMs);
                 delayMs = Math.Min(delayMs * 2, maxDelayMs);
             }
 
-            return !cancellationCheck() && condition();
+            return false;
         }
 
         internal static void WithOrderedLocks(uint idA, uint idB, object lockA, object lockB, Action action)

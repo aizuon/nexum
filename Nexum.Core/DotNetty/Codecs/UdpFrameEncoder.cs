@@ -8,7 +8,7 @@ using Nexum.Core;
 
 namespace NexumCore.DotNetty.Codecs
 {
-    internal class UdpFrameEncoder : MessageToMessageEncoder<UdpMessage>
+    internal sealed class UdpFrameEncoder : MessageToMessageEncoder<UdpMessage>
     {
         protected override void Encode(IChannelHandlerContext context, UdpMessage message, List<object> output)
         {

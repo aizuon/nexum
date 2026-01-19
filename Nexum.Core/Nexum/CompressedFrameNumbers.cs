@@ -1,10 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 
 namespace Nexum.Core
 {
-    internal class CompressedFrameNumbers
+    internal sealed class CompressedFrameNumbers
     {
         private readonly List<Range> _ranges = new List<Range>(8);
 
@@ -30,25 +31,25 @@ namespace Nexum.Core
         {
             if (_ranges.Count == 0)
             {
-                _ranges.Add(new Range { Left = frameNumber, Right = frameNumber });
+                _ranges.Add(new Range(frameNumber, frameNumber));
                 return;
             }
 
-            var lastRange = _ranges[_ranges.Count - 1];
+            ref var lastRange = ref CollectionsMarshal.AsSpan(_ranges)[^1];
 
             if (frameNumber >= lastRange.Left && frameNumber <= lastRange.Right)
                 return;
 
             if (frameNumber == lastRange.Right + 1)
             {
-                lastRange.Right = frameNumber;
-                _ranges[_ranges.Count - 1] = lastRange;
+                lastRange = new Range(lastRange.Left, frameNumber);
                 return;
             }
 
-            _ranges.Add(new Range { Left = frameNumber, Right = frameNumber });
+            _ranges.Add(new Range(frameNumber, frameNumber));
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public uint[] Uncompress()
         {
             int totalCount = TotalFrameCount;
@@ -68,6 +69,7 @@ namespace Nexum.Core
             return result;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool ReadFrom(NetMessage msg)
         {
             _ranges.Clear();
@@ -91,17 +93,20 @@ namespace Nexum.Core
                     if (!msg.Read(out right))
                         return false;
 
-                _ranges.Add(new Range { Left = left, Right = right });
+                _ranges.Add(new Range(left, right));
             }
 
             return true;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void WriteTo(NetMessage msg)
         {
             msg.Write(_ranges.Count);
 
-            foreach (var range in _ranges)
+            for (int i = 0; i < _ranges.Count; i++)
+            {
+                var range = _ranges[i];
                 if (range.Left == range.Right)
                 {
                     msg.Write((sbyte)0);
@@ -113,8 +118,10 @@ namespace Nexum.Core
                     msg.Write(range.Left);
                     msg.Write(range.Right);
                 }
+            }
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void Clear()
         {
             _ranges.Clear();
@@ -123,15 +130,25 @@ namespace Nexum.Core
         public CompressedFrameNumbers Clone()
         {
             var clone = new CompressedFrameNumbers();
-            foreach (var range in _ranges)
-                clone._ranges.Add(new Range { Left = range.Left, Right = range.Right });
+            for (int i = 0; i < _ranges.Count; i++)
+            {
+                var range = _ranges[i];
+                clone._ranges.Add(new Range(range.Left, range.Right));
+            }
+
             return clone;
         }
 
-        private struct Range
+        private readonly struct Range
         {
-            public uint Left;
-            public uint Right;
+            public readonly uint Left;
+            public readonly uint Right;
+
+            public Range(uint left, uint right)
+            {
+                Left = left;
+                Right = right;
+            }
         }
     }
 }

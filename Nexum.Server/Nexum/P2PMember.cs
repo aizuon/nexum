@@ -5,13 +5,11 @@ namespace Nexum.Server
 {
     public class P2PMember
     {
-        private static readonly Random Random = new Random();
-
         internal P2PMember(uint groupId, NetSession session)
         {
             GroupId = groupId;
             Session = session;
-            P2PFirstFrameNumber = (uint)Random.Next(1, int.MaxValue);
+            P2PFirstFrameNumber = (uint)Random.Shared.Next(1, int.MaxValue);
         }
 
         public Guid ConnectionMagicNumber { get; } = Guid.NewGuid();

@@ -3,7 +3,7 @@ using DotNetty.Buffers;
 
 namespace Nexum.Core
 {
-    internal class UdpMessage
+    internal sealed class UdpMessage
     {
         internal ushort SplitterFlag { get; set; }
 

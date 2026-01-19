@@ -3,10 +3,11 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Net;
 using System.Runtime.CompilerServices;
+using System.Threading;
 
 namespace Nexum.Core
 {
-    internal class UdpPacketDefragBoard
+    internal sealed class UdpPacketDefragBoard
     {
         private readonly ConcurrentDictionary<IPEndPoint, Dictionary<uint, DefraggingPacket>>
             _defraggingPackets = new ConcurrentDictionary<IPEndPoint, Dictionary<uint, DefraggingPacket>>();
@@ -15,9 +16,13 @@ namespace Nexum.Core
 
         private readonly List<IPEndPoint> _sendersToRemoveCache = new List<IPEndPoint>();
 
+        private int _inferredMtu = FragmentConfig.MtuLength;
+
         public uint LocalHostId { get; set; } = (uint)HostId.None;
 
         public uint MaxMessageLength { get; set; } = NetConfig.MessageMaxLength;
+
+        public int InferredMtu => _inferredMtu;
 
         public int PendingPacketCount
         {
@@ -94,30 +99,9 @@ namespace Nexum.Core
                 return AssembledPacketError.Ok;
             }
 
-            int maxFragmentId = UdpPacketFragBoard.GetFragmentCount(packetLength) - 1;
             uint fragmentId = message.FragmentId;
-            if (fragmentId > maxFragmentId)
-            {
-                error = $"Fragment ID {fragmentId} exceeds max {maxFragmentId}";
-                return AssembledPacketError.Error;
-            }
-
-            int destOffset = FragmentConfig.MtuLength * (int)fragmentId;
-            int expectedFragmentSize = Math.Min(FragmentConfig.MtuLength, packetLength - destOffset);
-
-            if (expectedFragmentSize != fragmentLength)
-            {
-                error = $"Fragment size mismatch: expected {expectedFragmentSize}, got {fragmentLength}";
-                return AssembledPacketError.Error;
-            }
-
             var endpoint = message.EndPoint;
-            if (!_defraggingPackets.TryGetValue(endpoint, out var packetsForSender))
-            {
-                packetsForSender = new Dictionary<uint, DefraggingPacket>();
-                _defraggingPackets.TryAdd(endpoint, packetsForSender);
-                _defraggingPackets.TryGetValue(endpoint, out packetsForSender);
-            }
+            var packetsForSender = _defraggingPackets.GetOrAdd(endpoint, _ => new Dictionary<uint, DefraggingPacket>());
 
             DefraggingPacket defraggingPacket;
             lock (packetsForSender)
@@ -125,16 +109,44 @@ namespace Nexum.Core
                 uint packetId = message.PacketId;
                 if (!packetsForSender.TryGetValue(packetId, out defraggingPacket))
                 {
-                    int fragmentCount = UdpPacketFragBoard.GetFragmentCount(packetLength);
-                    defraggingPacket = new DefraggingPacket
+                    if (fragmentId == 0)
                     {
-                        AssembledData = new byte[packetLength],
-                        FragmentReceivedFlags = new bool[fragmentCount],
-                        FragmentsReceivedCount = 0,
-                        TotalFragmentCount = fragmentCount,
-                        CreatedTime = currentTime
-                    };
-                    packetsForSender.Add(packetId, defraggingPacket);
+                        int mtuLength = fragmentLength;
+
+                        if (mtuLength < FragmentConfig.MinMtuLength || mtuLength > FragmentConfig.MaxMtuLength)
+                        {
+                            error = $"Invalid MTU inferred from fragment 0: {mtuLength}";
+                            return AssembledPacketError.Error;
+                        }
+
+                        int fragmentCount = UdpPacketFragBoard.GetFragmentCount(packetLength, mtuLength);
+
+                        defraggingPacket = new DefraggingPacket
+                        {
+                            AssembledData = GC.AllocateUninitializedArray<byte>(packetLength),
+                            FragmentReceivedFlags = new bool[fragmentCount],
+                            FragmentsReceivedCount = 0,
+                            TotalFragmentCount = fragmentCount,
+                            CreatedTime = currentTime,
+                            InferredMtu = mtuLength,
+                            MtuConfirmed = true
+                        };
+                        packetsForSender.Add(packetId, defraggingPacket);
+
+                        UpdateInferredMtu(mtuLength);
+                        ;
+                    }
+                    else
+                    {
+                        defraggingPacket = new DefraggingPacket
+                        {
+                            AssembledData = GC.AllocateUninitializedArray<byte>(packetLength),
+                            BufferedFragments = new Dictionary<uint, BufferedFragment>(),
+                            CreatedTime = currentTime,
+                            MtuConfirmed = false
+                        };
+                        packetsForSender.Add(packetId, defraggingPacket);
+                    }
                 }
                 else if (defraggingPacket.AssembledData.Length != packetLength)
                 {
@@ -143,20 +155,98 @@ namespace Nexum.Core
                     return AssembledPacketError.Error;
                 }
 
-                if (fragmentId >= defraggingPacket.FragmentReceivedFlags.Length)
+                if (!defraggingPacket.MtuConfirmed)
                 {
-                    error = "Fragment ID out of bounds";
-                    return AssembledPacketError.Error;
-                }
+                    if (fragmentId == 0)
+                    {
+                        int mtuLength = fragmentLength;
 
-                if (destOffset + fragmentLength > defraggingPacket.AssembledData.Length)
-                {
-                    error = "Fragment payload would overflow buffer";
-                    return AssembledPacketError.Error;
-                }
+                        if (mtuLength < FragmentConfig.MinMtuLength || mtuLength > FragmentConfig.MaxMtuLength)
+                        {
+                            packetsForSender.Remove(packetId);
+                            error = $"Invalid MTU inferred from fragment 0: {mtuLength}";
+                            return AssembledPacketError.Error;
+                        }
 
-                if (!defraggingPacket.FragmentReceivedFlags[fragmentId])
+                        int fragmentCount = UdpPacketFragBoard.GetFragmentCount(packetLength, mtuLength);
+
+                        defraggingPacket.InferredMtu = mtuLength;
+                        defraggingPacket.TotalFragmentCount = fragmentCount;
+                        defraggingPacket.FragmentReceivedFlags = new bool[fragmentCount];
+                        defraggingPacket.FragmentsReceivedCount = 0;
+                        defraggingPacket.MtuConfirmed = true;
+
+                        UpdateInferredMtu(mtuLength);
+
+                        defraggingPacket.FragmentReceivedFlags[0] = true;
+                        defraggingPacket.FragmentsReceivedCount++;
+                        content.GetBytes(content.ReaderIndex, defraggingPacket.AssembledData, 0, fragmentLength);
+
+                        if (defraggingPacket.BufferedFragments != null)
+                        {
+                            foreach (var buffered in defraggingPacket.BufferedFragments)
+                            {
+                                uint bufferedFragId = buffered.Key;
+                                var bufferedFrag = buffered.Value;
+
+                                int maxFragmentId = fragmentCount - 1;
+                                if (bufferedFragId > maxFragmentId)
+                                    continue;
+
+                                int destOffset = mtuLength * (int)bufferedFragId;
+                                int expectedSize = Math.Min(mtuLength, packetLength - destOffset);
+
+                                if (expectedSize != bufferedFrag.Data.Length)
+                                    continue;
+
+                                if (!defraggingPacket.FragmentReceivedFlags[bufferedFragId])
+                                {
+                                    defraggingPacket.FragmentReceivedFlags[bufferedFragId] = true;
+                                    defraggingPacket.FragmentsReceivedCount++;
+                                    Buffer.BlockCopy(bufferedFrag.Data, 0, defraggingPacket.AssembledData, destOffset,
+                                        bufferedFrag.Data.Length);
+                                }
+                            }
+
+                            defraggingPacket.BufferedFragments = null;
+                        }
+                    }
+                    else
+                    {
+                        if (!defraggingPacket.BufferedFragments.TryGetValue(fragmentId, out _))
+                        {
+                            byte[] fragData = GC.AllocateUninitializedArray<byte>(fragmentLength);
+                            content.GetBytes(content.ReaderIndex, fragData, 0, fragmentLength);
+                            defraggingPacket.BufferedFragments[fragmentId] = new BufferedFragment(fragData);
+                        }
+
+                        return AssembledPacketError.Assembling;
+                    }
+                }
+                else
                 {
+                    int mtuLength = defraggingPacket.InferredMtu;
+                    int maxFragmentId = defraggingPacket.TotalFragmentCount - 1;
+
+                    if (fragmentId > maxFragmentId)
+                    {
+                        error = $"Fragment ID {fragmentId} exceeds max {maxFragmentId} (MTU={mtuLength})";
+                        return AssembledPacketError.Error;
+                    }
+
+                    int destOffset = mtuLength * (int)fragmentId;
+                    int expectedFragmentSize = Math.Min(mtuLength, packetLength - destOffset);
+
+                    if (expectedFragmentSize != fragmentLength)
+                    {
+                        error =
+                            $"Fragment size mismatch: expected {expectedFragmentSize}, got {fragmentLength} (MTU={mtuLength})";
+                        return AssembledPacketError.Error;
+                    }
+
+                    if (defraggingPacket.FragmentReceivedFlags[fragmentId])
+                        return AssembledPacketError.Assembling;
+
                     defraggingPacket.FragmentReceivedFlags[fragmentId] = true;
                     defraggingPacket.FragmentsReceivedCount++;
                     content.GetBytes(content.ReaderIndex, defraggingPacket.AssembledData, destOffset, fragmentLength);
@@ -209,6 +299,29 @@ namespace Nexum.Core
         public void Clear()
         {
             _defraggingPackets.Clear();
+            _inferredMtu = FragmentConfig.MtuLength;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private void UpdateInferredMtu(int mtu)
+        {
+            int current;
+            do
+            {
+                current = _inferredMtu;
+                if (mtu <= current)
+                    return;
+            } while (Interlocked.CompareExchange(ref _inferredMtu, mtu, current) != current);
+        }
+    }
+
+    internal readonly struct BufferedFragment
+    {
+        public readonly byte[] Data;
+
+        public BufferedFragment(byte[] data)
+        {
+            Data = data;
         }
     }
 }

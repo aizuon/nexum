@@ -4,11 +4,12 @@ using System.Runtime.CompilerServices;
 
 namespace Nexum.Core
 {
-    internal class ReliableUdpReceiver
+    internal sealed class ReliableUdpReceiver
     {
         private readonly HashSet<uint> _acksToSend = new HashSet<uint>(64);
         private readonly ReliableUdpHost _owner;
         private readonly List<ReceiverFrame> _receiverWindow = new List<ReceiverFrame>(32);
+        private readonly List<uint> _sortedAcksCache = new List<uint>(64);
 
         private uint _lastReceivedDataFrameNumber;
         private double _lastSendGatheredAcksTime;
@@ -64,11 +65,11 @@ namespace Nexum.Core
 
         private void ProcessDataFrame(ReliableUdpFrame frame)
         {
-            _lastReceivedDataFrameNumber = frame.FrameNumber;
-
             if (!_owner.IsReliableChannel())
-                if (CompareFrameNumbers(frame.FrameNumber, ExpectedFrameNumber) >= 0)
-                    _acksToSend.Add(frame.FrameNumber);
+                _acksToSend.Add(frame.FrameNumber);
+
+            if (CompareFrameNumbers(frame.FrameNumber, ExpectedFrameNumber) >= 0)
+                _lastReceivedDataFrameNumber = frame.FrameNumber;
 
             if (IsTooOldFrame(frame.FrameNumber))
                 return;
@@ -123,12 +124,13 @@ namespace Nexum.Core
             if (_acksToSend.Count == 0)
                 return;
 
-            var sortedAcks = new List<uint>(_acksToSend);
-            sortedAcks.Sort();
+            _sortedAcksCache.Clear();
+            _sortedAcksCache.AddRange(_acksToSend);
+            _sortedAcksCache.Sort();
             _acksToSend.Clear();
 
             int index = 0;
-            while (index < sortedAcks.Count)
+            while (index < _sortedAcksCache.Count)
             {
                 var frame = new ReliableUdpFrame
                 {
@@ -140,9 +142,9 @@ namespace Nexum.Core
                 };
 
                 int count = 0;
-                while (index < sortedAcks.Count && count < ReliableUdpConfig.MaxAckCountInOneFrame)
+                while (index < _sortedAcksCache.Count && count < ReliableUdpConfig.MaxAckCountInOneFrame)
                 {
-                    frame.AckedFrameNumbers.AddSortedNumber(sortedAcks[index]);
+                    frame.AckedFrameNumbers.AddSortedNumber(_sortedAcksCache[index]);
                     index++;
                     count++;
                 }

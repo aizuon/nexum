@@ -1,6 +1,5 @@
 using System;
 using System.Buffers;
-using System.Linq;
 using System.Net;
 using BaseLib.Extensions;
 using Nexum.Core;
@@ -110,10 +109,7 @@ namespace Nexum.Server
             IPEndPoint udpEndPoint)
         {
             if (!ReliableUdpHelper.ParseFrame(message, out var frame))
-            {
-                session.Logger.Warning("Failed to parse ReliableUdp_Frame");
                 return;
-            }
 
             if (session.ToClientReliableUdp != null)
             {
@@ -161,7 +157,7 @@ namespace Nexum.Server
 
         private static void NotifyCSEncryptedSessionKeyHandler(NetServer server, NetSession session, NetMessage message)
         {
-            session.Logger.Information("Session key exchange initiated");
+            session.Logger.Debug("NotifyCSEncryptedSessionKey");
 
             var encryptedSessionKey = new ByteArray();
             var encryptedFastSessionKey = new ByteArray();
@@ -185,7 +181,7 @@ namespace Nexum.Server
         private static void NotifyServerConnectionRequestDataHandler(NetServer server, NetSession session,
             NetMessage message)
         {
-            session.Logger.Information("Connection request received");
+            session.Logger.Debug("NotifyServerConnectionRequestData");
 
             var payload = new ByteArray();
             if (!message.Read(ref payload) || !message.Read(out Guid version) || !message.Read(out uint netVersion))
@@ -194,7 +190,7 @@ namespace Nexum.Server
             if (netVersion != Constants.NetVersion)
             {
                 session.Logger.Warning(
-                    "Protocol version mismatch: client={ClientVersion}, server={ServerVersion}",
+                    "Protocol version mismatch => client={ClientVersion}, server={ServerVersion}",
                     netVersion, Constants.NetVersion);
 
                 var notifyProtocolVersionMismatch = new NetMessage();
@@ -220,6 +216,8 @@ namespace Nexum.Server
             if (!message.Read(out double clientTime) || !message.Read(out double clientRecentPing))
                 return;
 
+            message.Read(out int paddingSize);
+
             if (udpEndPoint != null)
                 session.LastUdpPing = DateTimeOffset.Now;
 
@@ -235,7 +233,11 @@ namespace Nexum.Server
             var unreliablePong = new NetMessage();
             unreliablePong.WriteEnum(MessageType.UnreliablePong);
             unreliablePong.Write(clientTime);
-            unreliablePong.Write(0.00d);
+            unreliablePong.Write(session.GetAbsoluteTime());
+
+            unreliablePong.Write(paddingSize);
+            if (paddingSize > 0)
+                unreliablePong.WriteZeroes(paddingSize);
 
             session.NexumToClientUdpIfAvailable(unreliablePong);
         }
@@ -340,18 +342,38 @@ namespace Nexum.Server
             if (!message.Read(out Guid magicNumber))
                 return;
 
-            if (!magicNumber.Equals(session.HolepunchMagicNumber))
-                return;
+            Guid capturedMagicNumber;
+            IPEndPoint capturedUdpEndPoint;
+
+            lock (session.UdpHolepunchLock)
+            {
+                if (!magicNumber.Equals(session.HolepunchMagicNumber))
+                {
+                    session.Logger.Warning(
+                        "ServerHolepunch => magic number mismatch, expected {Expected}, got {Actual}",
+                        session.HolepunchMagicNumber, magicNumber);
+                    return;
+                }
+
+                if (session.UdpEnabled)
+                {
+                    session.Logger.Debug("ServerHolepunch => UDP already enabled, ignoring duplicate");
+                    return;
+                }
+
+                capturedMagicNumber = session.HolepunchMagicNumber;
+                capturedUdpEndPoint = session.UdpEndPoint;
+            }
 
             session.Logger.Debug("ServerHolepunch => guid = {MagicNumber}", magicNumber);
 
             session.NexumToClientUdpIfAvailable(
-                HolepunchHelper.CreateServerHolepunchAckMessage(session.HolepunchMagicNumber, session.UdpEndPoint),
+                HolepunchHelper.CreateServerHolepunchAckMessage(capturedMagicNumber, capturedUdpEndPoint),
                 true);
-            HolepunchHelper.SendBurstMessages(
-                () => HolepunchHelper.CreateServerHolepunchAckMessage(session.HolepunchMagicNumber,
-                    session.UdpEndPoint),
-                msg => session.NexumToClientUdpIfAvailable(msg, true)
+            HolepunchHelper.SendBurstMessagesWithCheck(
+                () => HolepunchHelper.CreateServerHolepunchAckMessage(capturedMagicNumber, capturedUdpEndPoint),
+                msg => session.NexumToClientUdpIfAvailable(msg, true),
+                () => !session.UdpEnabled
             );
         }
 
@@ -363,23 +385,39 @@ namespace Nexum.Server
             if (!message.Read(out Guid magicNumber))
                 return;
 
-            if (!magicNumber.Equals(session.HolepunchMagicNumber))
-                return;
-
             var localUdpSocket = new IPEndPoint(IPAddress.Loopback, IPEndPoint.MinPort);
             var publicUdpSocket = new IPEndPoint(IPAddress.Loopback, IPEndPoint.MinPort);
 
             if (!message.ReadIPEndPoint(ref localUdpSocket) || !message.ReadIPEndPoint(ref publicUdpSocket))
                 return;
 
+            Guid capturedMagicNumber;
+
             lock (session.UdpHolepunchLock)
             {
-                if (session.UdpEnabled)
+                if (!magicNumber.Equals(session.HolepunchMagicNumber))
+                {
+                    session.Logger.Warning(
+                        "NotifyHolepunchSuccess => magic number mismatch, expected {Expected}, got {Actual}",
+                        session.HolepunchMagicNumber, magicNumber);
                     return;
+                }
+
+                if (session.UdpEnabled)
+                {
+                    session.Logger.Debug("NotifyHolepunchSuccess => UDP already enabled, ignoring duplicate");
+                    return;
+                }
+
+                session.Logger.Debug(
+                    "NotifyHolepunchSuccess => guid = {MagicNumber}, localEndpoint = {LocalEndpoint}, publicEndpoint = {PublicEndpoint}",
+                    magicNumber, localUdpSocket, publicUdpSocket);
 
                 session.UdpEnabled = true;
                 session.LastUdpPing = DateTimeOffset.Now;
                 session.UdpLocalEndPointInternal = localUdpSocket;
+
+                capturedMagicNumber = session.HolepunchMagicNumber;
 
                 if (session.P2PGroup != null &&
                     session.P2PGroup.P2PMembersInternal.TryGetValue(session.HostId, out var member))
@@ -388,18 +426,53 @@ namespace Nexum.Server
                 server.StartReliableUdpLoop();
             }
 
-            session.Logger.Debug(
-                "NotifyHolepunchSuccess => guid = {MagicNumber}, localEndpoint = {LocalEndpoint}, publicEndpoint = {PublicEndpoint}",
-                magicNumber, localUdpSocket, publicUdpSocket);
-
             session.NexumToClientUdpIfAvailable(
-                HolepunchHelper.CreateNotifyClientServerUdpMatchedMessage(session.HolepunchMagicNumber), true);
+                HolepunchHelper.CreateNotifyClientServerUdpMatchedMessage(capturedMagicNumber), true);
             HolepunchHelper.SendBurstMessages(
-                () => HolepunchHelper.CreateNotifyClientServerUdpMatchedMessage(session.HolepunchMagicNumber),
+                () => HolepunchHelper.CreateNotifyClientServerUdpMatchedMessage(capturedMagicNumber),
                 msg => session.NexumToClientUdpIfAvailable(msg, true),
-                HolepunchConstants.UdpMatchedDelayMs
+                HolepunchConfig.UdpMatchedDelayMs
             );
+
+            ProcessPendingPeerHolepunchRequests(session);
+
             server.InitiateP2PConnections(session);
+        }
+
+        private static void ProcessPendingPeerHolepunchRequests(NetSession session)
+        {
+            while (session.PendingPeerHolepunchRequests.TryDequeue(out var request))
+            {
+                if (request.SenderSession.IsDisposed)
+                    continue;
+
+                lock (request.SenderSession.UdpHolepunchLock)
+                {
+                    if (!request.SenderSession.UdpEnabled)
+                        continue;
+                }
+
+                if (request.SenderSession.UdpSocket?.Channel == null)
+                    continue;
+
+                var senderUdpEndpoint = request.SenderSession.UdpEndPoint;
+                if (senderUdpEndpoint == null)
+                    continue;
+
+                session.Logger.Debug(
+                    "ProcessPendingPeerHolepunchRequests => processing queued request from hostId = {SenderHostId}, magicNumber = {MagicNumber}",
+                    request.SenderSession.HostId,
+                    request.MagicNumber);
+
+                request.SenderSession.NexumToClient(
+                    HolepunchHelper.CreatePeerUdpServerHolepunchAckMessage(request.MagicNumber, senderUdpEndpoint,
+                        session.HostId));
+                HolepunchHelper.SendBurstMessages(
+                    () => HolepunchHelper.CreatePeerUdpServerHolepunchAckMessage(request.MagicNumber, senderUdpEndpoint,
+                        session.HostId),
+                    msg => request.SenderSession.NexumToClient(msg)
+                );
+            }
         }
 
         private static void PeerUdpServerHolepunchHandler(NetServer server, NetSession session, NetMessage message,
@@ -413,15 +486,44 @@ namespace Nexum.Server
 
             var group = session.P2PGroup;
             if (group == null)
+            {
+                session.Logger.Warning("PeerUdpServerHolepunch => session has no P2P group");
                 return;
+            }
 
-            if (!group.P2PMembersInternal.TryGetValue(hostId, out var targetPeer) || !targetPeer.Session.UdpEnabled)
+            if (!group.P2PMembersInternal.TryGetValue(hostId, out var targetPeer))
+            {
+                session.Logger.Warning("PeerUdpServerHolepunch => target peer not found for hostId = {HostId}", hostId);
                 return;
+            }
+
+            lock (session.UdpHolepunchLock)
+            {
+                if (!session.UdpEnabled)
+                {
+                    session.Logger.Debug("PeerUdpServerHolepunch => session UDP not enabled, cannot process");
+                    return;
+                }
+            }
 
             session.Logger.Debug(
                 "PeerUdpServerHolepunch => guid = {MagicNumber}, targetHostId = {TargetHostId}",
                 magicNumber,
                 hostId);
+
+            lock (targetPeer.Session.UdpHolepunchLock)
+            {
+                if (!targetPeer.Session.UdpEnabled)
+                {
+                    session.Logger.Debug(
+                        "PeerUdpServerHolepunch => guid = {MagicNumber}, targetHostId = {TargetHostId} - target UDP not ready, queueing",
+                        magicNumber,
+                        hostId);
+                    targetPeer.Session.PendingPeerHolepunchRequests.Enqueue(
+                        new PendingPeerHolepunchRequest(session, magicNumber));
+                    return;
+                }
+            }
 
             session.NexumToClient(
                 HolepunchHelper.CreatePeerUdpServerHolepunchAckMessage(magicNumber, udpEndPoint,
@@ -450,12 +552,23 @@ namespace Nexum.Server
 
             var group = session.P2PGroup;
             if (group == null)
+            {
+                session.Logger.Warning("PeerUdpNotifyHolepunchSuccess => session has no P2P group");
                 return;
+            }
 
             if (!group.P2PMembersInternal.TryGetValue(session.HostId, out var peer) ||
                 !peer.ConnectionStates.TryGetValue(hostId, out var state) ||
                 !state.RemotePeer.ConnectionStates.TryGetValue(session.HostId, out var remoteState))
+            {
+                session.Logger.Warning(
+                    "PeerUdpNotifyHolepunchSuccess => connection state not found for hostId = {HostId}", hostId);
                 return;
+            }
+
+            session.Logger.Debug(
+                "PeerUdpNotifyHolepunchSuccess => localEndpoint = {LocalEndpoint}, publicEndpoint = {PublicEndpoint}, targetHostId = {TargetHostId}",
+                localUdpSocket, publicUdpSocket, hostId);
 
             bool shouldSendRequestP2PHolepunch = HolepunchHelper.WithOrderedLocks(
                 session.HostId, hostId, state.StateLock, remoteState.StateLock, () =>
@@ -471,10 +584,6 @@ namespace Nexum.Server
 
             if (!shouldSendRequestP2PHolepunch)
                 return;
-
-            session.Logger.Debug(
-                "PeerUdpNotifyHolepunchSuccess => localEndpoint = {LocalEndpoint}, publicEndpoint = {PublicEndpoint}, targetHostId = {TargetHostId}",
-                localUdpSocket, publicUdpSocket, hostId);
 
             var requestP2PHolepunchA = new NetMessage();
             requestP2PHolepunchA.Write(hostId);
@@ -507,16 +616,25 @@ namespace Nexum.Server
                         return;
 
                     var reason = (ErrorType)reasonValue;
-                    session.Logger.Debug("P2P_NotifyDirectP2PDisconnected => hostId = {HostId}, reason = {Reason}",
-                        hostId, reason);
                     var group = session.P2PGroup;
                     if (group == null)
+                    {
+                        session.Logger.Warning("P2P_NotifyDirectP2PDisconnected => session has no P2P group");
                         return;
+                    }
 
                     if (!group.P2PMembersInternal.TryGetValue(session.HostId, out var peer) ||
                         !peer.ConnectionStates.TryGetValue(hostId, out var stateA) ||
                         !stateA.RemotePeer.ConnectionStates.TryGetValue(session.HostId, out var stateB))
+                    {
+                        session.Logger.Warning(
+                            "P2P_NotifyDirectP2PDisconnected => connection state not found for hostId = {HostId}",
+                            hostId);
                         break;
+                    }
+
+                    session.Logger.Debug("P2P_NotifyDirectP2PDisconnected => hostId = {HostId}, reason = {Reason}",
+                        hostId, reason);
 
                     bool shouldNotify = HolepunchHelper.WithOrderedLocks(
                         session.HostId, hostId, stateA.StateLock, stateB.StateLock, () =>
@@ -557,18 +675,26 @@ namespace Nexum.Server
                         !message.Read(out bool localPortReuseSuccess))
                         return;
 
-                    session.Logger.Debug(
-                        "P2PGroup_MemberJoin_Ack => groupHostId = {GroupHostId}, addedMemberHostId = {AddedMemberHostId}, eventId = {EventId}",
-                        groupHostId, addedMemberHostId, eventId);
-
                     if (session.HostId == addedMemberHostId)
                         return;
                     var group = session.P2PGroup;
                     if (group == null)
+                    {
+                        session.Logger.Warning("P2PGroup_MemberJoin_Ack => session has no P2P group");
                         return;
+                    }
 
                     if (group.HostId != groupHostId)
+                    {
+                        session.Logger.Warning(
+                            "P2PGroup_MemberJoin_Ack => group hostId mismatch, expected {Expected}, got {Actual}",
+                            group.HostId, groupHostId);
                         return;
+                    }
+
+                    session.Logger.Debug(
+                        "P2PGroup_MemberJoin_Ack => groupHostId = {GroupHostId}, addedMemberHostId = {AddedMemberHostId}, eventId = {EventId}",
+                        groupHostId, addedMemberHostId, eventId);
 
                     if (group.P2PMembersInternal.TryGetValue(session.HostId, out var peer) &&
                         peer.ConnectionStates.TryGetValue(addedMemberHostId, out var stateA) &&
@@ -600,16 +726,33 @@ namespace Nexum.Server
 
                     var group = session.P2PGroup;
                     if (group == null)
+                    {
+                        session.Logger.Warning("NotifyP2PHolepunchSuccess => session has no P2P group");
                         return;
+                    }
 
                     if (session.HostId != hostIdA && session.HostId != hostIdB)
+                    {
+                        session.Logger.Warning(
+                            "NotifyP2PHolepunchSuccess => session hostId {SessionHostId} doesn't match hostIdA {HostIdA} or hostIdB {HostIdB}",
+                            session.HostId, hostIdA, hostIdB);
                         return;
+                    }
 
                     if (!group.P2PMembersInternal.TryGetValue(hostIdA, out var peerA) ||
                         !group.P2PMembersInternal.TryGetValue(hostIdB, out var peerB) ||
                         !peerA.ConnectionStates.TryGetValue(peerB.Session.HostId, out var stateA) ||
                         !peerB.ConnectionStates.TryGetValue(peerA.Session.HostId, out var stateB))
+                    {
+                        session.Logger.Warning(
+                            "NotifyP2PHolepunchSuccess => connection state not found for hostIdA = {HostIdA}, hostIdB = {HostIdB}",
+                            hostIdA, hostIdB);
                         break;
+                    }
+
+                    session.Logger.Debug(
+                        "NotifyP2PHolepunchSuccess => hostIdA = {HostIdA}, hostIdB = {HostIdB}, endpointA = {EndpointA}, endpointB = {EndpointB}, endpointC = {EndpointC}, endpointD = {EndpointD}",
+                        hostIdA, hostIdB, endpointA, endpointB, endpointC, endpointD);
 
                     bool shouldSendEstablish = HolepunchHelper.WithOrderedLocks(
                         hostIdA, hostIdB, stateA.StateLock, stateB.StateLock, () =>
@@ -632,10 +775,6 @@ namespace Nexum.Server
 
                     if (shouldSendEstablish)
                     {
-                        session.Logger.Debug(
-                            "NotifyP2PHolepunchSuccess => hostIdA = {HostIdA}, hostIdB = {HostIdB}, endpointA = {EndpointA}, endpointB = {EndpointB}, endpointC = {EndpointC}, endpointD = {EndpointD}",
-                            hostIdA, hostIdB, endpointA, endpointB, endpointC, endpointD);
-
                         var notifyEstablished = new NetMessage();
                         notifyEstablished.Write(hostIdA);
                         notifyEstablished.Write(hostIdB);
@@ -658,13 +797,24 @@ namespace Nexum.Server
 
                     var group = session.P2PGroup;
                     if (group == null)
+                    {
+                        session.Logger.Warning("NotifyJitDirectP2PTriggered => session has no P2P group");
                         return;
+                    }
 
                     if (!group.P2PMembersInternal.TryGetValue(session.HostId, out var peerA) ||
                         !group.P2PMembersInternal.TryGetValue(targetHostId, out var peerB) ||
                         !peerA.ConnectionStates.TryGetValue(peerB.Session.HostId, out var stateA) ||
                         !peerB.ConnectionStates.TryGetValue(peerA.Session.HostId, out var stateB))
+                    {
+                        session.Logger.Warning(
+                            "NotifyJitDirectP2PTriggered => connection state not found for targetHostId = {TargetHostId}",
+                            targetHostId);
                         break;
+                    }
+
+                    session.Logger.Debug("NotifyJitDirectP2PTriggered => targetHostId = {TargetHostId}",
+                        targetHostId);
 
                     bool shouldSendNewConnection = HolepunchHelper.WithOrderedLocks(
                         session.HostId, targetHostId, stateA.StateLock, stateB.StateLock, () =>
@@ -687,9 +837,6 @@ namespace Nexum.Server
 
                     if (shouldSendNewConnection)
                     {
-                        session.Logger.Debug("NotifyJitDirectP2PTriggered => targetHostId = {TargetHostId}",
-                            targetHostId);
-
                         var newConnectionA = new NetMessage();
                         newConnectionA.Write(peerB.Session.HostId);
                         peerA.Session.RmiToClient((ushort)NexumOpCode.NewDirectP2PConnection, newConnectionA);
@@ -710,10 +857,28 @@ namespace Nexum.Server
                         return;
                     }
 
+                    session.Logger.Debug("C2S_RequestCreateUdpSocket => hostId = {HostId}", session.HostId);
+
                     server.MagicNumberSessions.TryRemove(session.HolepunchMagicNumber);
 
-                    int socketIndex = server.Random.Next(server.UdpSockets.Count);
-                    var udpSocket = server.UdpSockets.Values.ToArray()[socketIndex];
+                    lock (session.UdpHolepunchLock)
+                    {
+                        if (session.UdpSessionInitialized)
+                        {
+                            session.Logger.Debug(
+                                "C2S_RequestCreateUdpSocket => closing existing UDP connection");
+                            server.UdpSessions.TryRemove(FilterTag.Create(session.HostId, (uint)HostId.Server),
+                                out _);
+                            session.UdpSessionInitialized = false;
+                        }
+
+                        session.UdpEnabled = false;
+                        session.UdpEndPointInternal = null;
+                        session.UdpLocalEndPointInternal = null;
+                        session.ResetToClientReliableUdp();
+                    }
+
+                    var udpSocket = server.GetRandomUdpSocket();
 
                     session.UdpSocket = udpSocket;
                     session.HolepunchMagicNumber = Guid.NewGuid();
@@ -741,6 +906,7 @@ namespace Nexum.Server
                         return;
                     }
 
+                    session.Logger.Debug("C2S_CreateUdpSocketAck => hostId = {HostId}", session.HostId);
                     session.Logger.Debug("C2S_CreateUdpSocketAck => requesting holepunch with guid = {MagicNumber}",
                         session.HolepunchMagicNumber);
 
@@ -763,7 +929,7 @@ namespace Nexum.Server
                     break;
 
                 default:
-                    server.OnRMIRecieve(session, message, rmiId);
+                    server.OnRMIReceive(session, message, rmiId);
                     break;
             }
         }

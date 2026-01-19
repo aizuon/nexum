@@ -1,6 +1,6 @@
 namespace Nexum.Core
 {
-    public class NetSettings
+    public sealed class NetSettings
     {
         public bool AllowServerAsP2PGroupMember;
         public DirectP2PStartCondition DirectP2PStartCondition;

@@ -3,7 +3,19 @@ using System.Net;
 
 namespace Nexum.Server
 {
-    internal class P2PConnectionState
+    internal readonly struct PendingPeerHolepunchRequest
+    {
+        internal PendingPeerHolepunchRequest(NetSession senderSession, Guid magicNumber)
+        {
+            SenderSession = senderSession;
+            MagicNumber = magicNumber;
+        }
+
+        internal NetSession SenderSession { get; }
+        internal Guid MagicNumber { get; }
+    }
+
+    internal sealed class P2PConnectionState
     {
         internal P2PConnectionState(P2PMember remotePeer)
         {

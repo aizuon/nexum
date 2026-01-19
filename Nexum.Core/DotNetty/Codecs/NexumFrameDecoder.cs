@@ -2,12 +2,14 @@ using System;
 using DotNetty.Buffers;
 using DotNetty.Transport.Channels;
 using Serilog;
+using Constants = Serilog.Core.Constants;
 
 namespace NexumCore.DotNetty.Codecs
 {
-    internal class NexumFrameDecoder : LengthFieldBasedFrameDecoder
+    internal sealed class NexumFrameDecoder : LengthFieldBasedFrameDecoder
     {
-        internal static readonly ILogger Logger = Log.ForContext<NexumFrameDecoder>();
+        internal static readonly ILogger Logger =
+            Log.ForContext(Constants.SourceContextPropertyName, nameof(NexumFrameDecoder));
 
         public NexumFrameDecoder(int maxFrameLength)
             : base(ByteOrder.LittleEndian, maxFrameLength, 2, 1, 0, 0, true)

@@ -61,21 +61,43 @@ namespace Nexum.Core
             Write(unicode ? (byte)2 : (byte)1);
             if (unicode)
             {
-                byte[] bytes = Encoding.Unicode.GetBytes(obj);
-                WriteScalar(bytes.Length / 2);
-                Write(bytes);
+                int maxByteCount = obj.Length * 2;
+                if (maxByteCount <= 256)
+                {
+                    Span<byte> buffer = stackalloc byte[maxByteCount];
+                    int bytesWritten = Encoding.Unicode.GetBytes(obj, buffer);
+                    WriteScalar(bytesWritten / 2);
+                    Write(buffer.Slice(0, bytesWritten));
+                }
+                else
+                {
+                    byte[] bytes = Encoding.Unicode.GetBytes(obj);
+                    WriteScalar(bytes.Length / 2);
+                    Write(bytes);
+                }
             }
             else
             {
                 WriteScalar(obj.Length);
-                Write(Latin1Encoding.GetBytes(obj));
+                if (obj.Length <= 256)
+                {
+                    Span<byte> buffer = stackalloc byte[obj.Length];
+                    Latin1Encoding.GetBytes(obj, buffer);
+                    Write(buffer);
+                }
+                else
+                {
+                    Write(Latin1Encoding.GetBytes(obj));
+                }
             }
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void Write(Guid obj)
         {
-            Write(obj.ToByteArray());
+            Span<byte> bytes = stackalloc byte[16];
+            obj.TryWriteBytes(bytes);
+            Write(bytes);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]

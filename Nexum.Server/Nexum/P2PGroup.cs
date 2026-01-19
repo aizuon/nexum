@@ -49,7 +49,7 @@ namespace Nexum.Server
                     p2pGroupMemberJoin.Write(memberToJoin.P2PFirstFrameNumber);
                     p2pGroupMemberJoin.Write(memberToJoin.ConnectionMagicNumber);
                     p2pGroupMemberJoin.Write(Server.AllowDirectP2P);
-                    p2pGroupMemberJoin.Write((ushort)0);
+                    p2pGroupMemberJoin.Write(session.UdpEndPoint?.Port ?? 0);
 
                     session.RmiToClient((ushort)NexumOpCode.P2PGroup_MemberJoin, p2pGroupMemberJoin);
                 }
@@ -63,7 +63,7 @@ namespace Nexum.Server
                     p2pGroupMemberJoin.Write(memberToJoin.P2PFirstFrameNumber);
                     p2pGroupMemberJoin.Write(memberToJoin.ConnectionMagicNumber);
                     p2pGroupMemberJoin.Write(Server.AllowDirectP2P);
-                    p2pGroupMemberJoin.Write((ushort)0);
+                    p2pGroupMemberJoin.Write(session.UdpEndPoint?.Port ?? 0);
 
                     session.RmiToClient((ushort)NexumOpCode.P2PGroup_MemberJoin_Unencrypted, p2pGroupMemberJoin);
                 }
@@ -94,7 +94,7 @@ namespace Nexum.Server
                         p2pGroupMemberJoin1.Write(memberToJoin.P2PFirstFrameNumber);
                         p2pGroupMemberJoin1.Write(memberToJoin.ConnectionMagicNumber);
                         p2pGroupMemberJoin1.Write(Server.AllowDirectP2P);
-                        p2pGroupMemberJoin1.Write((ushort)0);
+                        p2pGroupMemberJoin1.Write(session.UdpEndPoint?.Port ?? 0);
 
                         member.Session.RmiToClient((ushort)NexumOpCode.P2PGroup_MemberJoin, p2pGroupMemberJoin1);
 
@@ -108,7 +108,7 @@ namespace Nexum.Server
                         p2pGroupMemberJoin2.Write(member.P2PFirstFrameNumber);
                         p2pGroupMemberJoin2.Write(member.ConnectionMagicNumber);
                         p2pGroupMemberJoin2.Write(Server.AllowDirectP2P);
-                        p2pGroupMemberJoin2.Write((ushort)0);
+                        p2pGroupMemberJoin2.Write(member.Session.UdpEndPoint?.Port ?? 0);
 
                         session.RmiToClient((ushort)NexumOpCode.P2PGroup_MemberJoin, p2pGroupMemberJoin2);
                     }
@@ -122,7 +122,7 @@ namespace Nexum.Server
                         p2pGroupMemberJoin1.Write(memberToJoin.P2PFirstFrameNumber);
                         p2pGroupMemberJoin1.Write(memberToJoin.ConnectionMagicNumber);
                         p2pGroupMemberJoin1.Write(Server.AllowDirectP2P);
-                        p2pGroupMemberJoin1.Write((ushort)0);
+                        p2pGroupMemberJoin1.Write(session.UdpEndPoint?.Port ?? 0);
 
                         member.Session.RmiToClient((ushort)NexumOpCode.P2PGroup_MemberJoin_Unencrypted,
                             p2pGroupMemberJoin1);
@@ -135,7 +135,7 @@ namespace Nexum.Server
                         p2pGroupMemberJoin2.Write(member.P2PFirstFrameNumber);
                         p2pGroupMemberJoin2.Write(member.ConnectionMagicNumber);
                         p2pGroupMemberJoin2.Write(Server.AllowDirectP2P);
-                        p2pGroupMemberJoin2.Write((ushort)0);
+                        p2pGroupMemberJoin2.Write(member.Session.UdpEndPoint?.Port ?? 0);
 
                         session.RmiToClient((ushort)NexumOpCode.P2PGroup_MemberJoin_Unencrypted, p2pGroupMemberJoin2);
                     }

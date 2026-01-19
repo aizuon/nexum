@@ -6,12 +6,15 @@ using DotNetty.Transport.Channels;
 using DotNetty.Transport.Channels.Sockets;
 using Nexum.Core;
 using Serilog;
+using Constants = Serilog.Core.Constants;
 
 namespace NexumCore.DotNetty.Codecs
 {
-    internal class UdpFrameDecoder : MessageToMessageDecoder<DatagramPacket>
+    internal sealed class UdpFrameDecoder : MessageToMessageDecoder<DatagramPacket>
     {
-        internal static readonly ILogger Logger = Log.ForContext<UdpFrameDecoder>();
+        internal static readonly ILogger Logger =
+            Log.ForContext(Constants.SourceContextPropertyName, nameof(UdpFrameDecoder));
+
         internal readonly int MaxFrameLength;
 
         internal UdpFrameDecoder(int maxFrameLength)

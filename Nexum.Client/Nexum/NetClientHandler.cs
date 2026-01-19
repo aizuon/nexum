@@ -9,16 +9,17 @@ using Org.BouncyCastle.Asn1;
 
 namespace Nexum.Client
 {
-    internal class NetClientHandler
+    internal static class NetClientHandler
     {
-        internal static void ReadFrame(NetClient client, NetMessage message, IPEndPoint udpEndPoint = null,
+        internal static void ReadFrame(NetClient client, NetMessage message, ushort filterTag = 0,
+            IPEndPoint udpEndPoint = null,
             bool bypass = false)
         {
             lock (client.RecvLock)
             {
                 if (bypass)
                 {
-                    ReadMessage(client, message, udpEndPoint);
+                    ReadMessage(client, message, filterTag, udpEndPoint);
                     return;
                 }
 
@@ -27,11 +28,12 @@ namespace Nexum.Client
                     return;
 
                 var innerMessage = new NetMessage(packet) { RelayFrom = message.RelayFrom };
-                ReadMessage(client, innerMessage, udpEndPoint);
+                ReadMessage(client, innerMessage, filterTag, udpEndPoint);
             }
         }
 
-        internal static void ReadMessage(NetClient client, NetMessage message, IPEndPoint udpEndPoint = null)
+        internal static void ReadMessage(NetClient client, NetMessage message, ushort filterTag = 0,
+            IPEndPoint udpEndPoint = null)
         {
             message.WriteOffset = message.Length;
 
@@ -113,7 +115,7 @@ namespace Nexum.Client
                     break;
 
                 case MessageType.ReliableUdp_Frame:
-                    ReliableUdpFrameHandler(client, message, udpEndPoint);
+                    ReliableUdpFrameHandler(client, message, filterTag, udpEndPoint);
                     break;
 
                 case MessageType.UnreliablePong:
@@ -142,20 +144,19 @@ namespace Nexum.Client
             }
         }
 
-        private static void ReliableUdpFrameHandler(NetClient client, NetMessage message, IPEndPoint udpEndPoint)
+        private static void ReliableUdpFrameHandler(NetClient client, NetMessage message, ushort filterTag,
+            IPEndPoint udpEndPoint)
         {
             if (!ReliableUdpHelper.ParseFrame(message, out var frame))
-            {
-                client.Logger.Warning("Failed to parse ReliableUdp_Frame");
                 return;
-            }
 
-            if (client.ServerUdpSocket != null && client.ServerUdpSocket.Equals(udpEndPoint))
+            if ((client.ServerUdpSocket != null && client.ServerUdpSocket.Equals(udpEndPoint)) ||
+                FilterTag.Create((uint)HostId.Server, client.HostId) == filterTag)
             {
                 if (client.ToServerReliableUdp != null)
                 {
                     client.ToServerReliableUdp.TakeReceivedFrame(frame);
-                    ExtractMessagesFromServerReliableUdpStream(client, udpEndPoint);
+                    ExtractMessagesFromServerReliableUdpStream(client, filterTag, udpEndPoint);
                 }
                 else
                 {
@@ -163,37 +164,29 @@ namespace Nexum.Client
                         if (ReliableUdpHelper.UnwrapPayload(frame.Data, out byte[] payload))
                         {
                             var innerMessage = new NetMessage(new ByteArray(payload));
-                            ReadMessage(client, innerMessage, udpEndPoint);
+                            ReadMessage(client, innerMessage, filterTag, udpEndPoint);
                         }
                 }
 
                 return;
             }
 
-            P2PMember sourceMember = null;
-            if (client.P2PGroup?.P2PMembers != null)
-                foreach (var member in client.P2PGroup.P2PMembers.Values)
-                    if (member.PeerLocalToRemoteSocket != null &&
-                        member.PeerLocalToRemoteSocket.Equals(udpEndPoint))
-                    {
-                        sourceMember = member;
-                        break;
-                    }
-
+            var sourceMember = client.P2PGroup?.FindMember(client.HostId, udpEndPoint, filterTag);
             if (sourceMember == null)
             {
                 client.Logger.Verbose(
-                    "ReliableUdp_Frame from unknown endpoint {Endpoint}, ignoring",
-                    udpEndPoint);
+                    "ReliableUdp_Frame from unknown source, ignoring => udpEndPoint = {UdpEndPoint}, filterTag = {FilterTag}",
+                    udpEndPoint, filterTag);
                 return;
             }
 
             sourceMember.ProcessReceivedReliableUdpFrame(frame);
 
-            ExtractMessagesFromP2PReliableUdpStream(client, sourceMember, udpEndPoint);
+            ExtractMessagesFromP2PReliableUdpStream(client, sourceMember, filterTag, udpEndPoint);
         }
 
-        private static void ExtractMessagesFromServerReliableUdpStream(NetClient client, IPEndPoint udpEndPoint)
+        private static void ExtractMessagesFromServerReliableUdpStream(NetClient client, ushort filterTag,
+            IPEndPoint udpEndPoint)
         {
             var stream = client.ToServerReliableUdp?.ReceivedStream;
             if (stream == null || stream.Length == 0)
@@ -215,11 +208,12 @@ namespace Nexum.Client
                 stream.PopFront(consumedBytes);
 
                 var innerMessage = new NetMessage(payload);
-                ReadMessage(client, innerMessage, udpEndPoint);
+                ReadMessage(client, innerMessage, filterTag, udpEndPoint);
             }
         }
 
         private static void ExtractMessagesFromP2PReliableUdpStream(NetClient client, P2PMember member,
+            ushort filterTag,
             IPEndPoint udpEndPoint)
         {
             var stream = member.ToPeerReliableUdp?.ReceivedStream;
@@ -242,7 +236,7 @@ namespace Nexum.Client
                 stream.PopFront(consumedBytes);
 
                 var innerMessage = new NetMessage(payload);
-                ReadMessage(client, innerMessage, udpEndPoint);
+                ReadMessage(client, innerMessage, filterTag, udpEndPoint);
             }
         }
 
@@ -251,14 +245,22 @@ namespace Nexum.Client
             if (!message.Read(out Guid magicNumber))
                 return;
 
-            client.UdpMagicNumber = magicNumber;
+            lock (client.UdpHolepunchLock)
+            {
+                if (client.UdpEnabled)
+                    return;
+
+                client.UdpMagicNumber = magicNumber;
+            }
+
             client.Logger.Debug("RequestStartServerHolepunch => guid = {MagicNumber}", magicNumber);
 
             client.NexumToServerUdpIfAvailable(HolepunchHelper.CreateServerHolepunchMessage(magicNumber), true);
-            HolepunchHelper.SendBurstMessages(
+            HolepunchHelper.SendBurstMessagesWithCheck(
                 () => HolepunchHelper.CreateServerHolepunchMessage(magicNumber),
                 msg => client.NexumToServerUdpIfAvailable(msg, true),
-                HolepunchConstants.UdpMatchedDelayMs
+                () => client.SelfUdpSocket == null,
+                HolepunchConfig.UdpMatchedDelayMs
             );
         }
 
@@ -269,28 +271,44 @@ namespace Nexum.Client
             if (!message.Read(out Guid magicNumber) || !message.ReadIPEndPoint(ref selfUdpSocket))
                 return;
 
-            if (!magicNumber.Equals(client.UdpMagicNumber))
-                return;
             var udpChannel = client.UdpChannel;
             if (udpChannel == null)
                 return;
 
+            Guid capturedMagicNumber;
+            IPEndPoint capturedSelfUdpSocket;
+
             lock (client.UdpHolepunchLock)
             {
-                if (client.SelfUdpSocket != null)
+                if (!magicNumber.Equals(client.UdpMagicNumber))
+                {
+                    client.Logger.Warning(
+                        "ServerHolepunchAck => magic number mismatch, expected {Expected}, got {Actual}",
+                        client.UdpMagicNumber, magicNumber);
                     return;
+                }
 
-                client.Logger.Debug("ServerHolepunchAck => guid = {MagicNumber}, endpoint = {Endpoint}", magicNumber,
-                    selfUdpSocket);
+                if (client.SelfUdpSocket != null)
+                {
+                    client.Logger.Debug("ServerHolepunchAck => SelfUdpSocket already set, ignoring duplicate");
+                    return;
+                }
+
                 client.SelfUdpSocket = selfUdpSocket;
+
+                capturedMagicNumber = client.UdpMagicNumber;
+                capturedSelfUdpSocket = client.SelfUdpSocket;
             }
+
+            client.Logger.Debug("ServerHolepunchAck => guid = {MagicNumber}, endpoint = {Endpoint}", magicNumber,
+                selfUdpSocket);
 
             var notifyHolepunchSuccess = new NetMessage();
             notifyHolepunchSuccess.WriteEnum(MessageType.NotifyHolepunchSuccess);
-            notifyHolepunchSuccess.Write(client.UdpMagicNumber);
+            notifyHolepunchSuccess.Write(capturedMagicNumber);
             notifyHolepunchSuccess.Write(new IPEndPoint(client.LocalIP,
                 ((IPEndPoint)udpChannel.LocalAddress).Port));
-            notifyHolepunchSuccess.Write(client.SelfUdpSocket);
+            notifyHolepunchSuccess.Write(capturedSelfUdpSocket);
 
             client.NexumToServer(notifyHolepunchSuccess);
 
@@ -316,6 +334,7 @@ namespace Nexum.Client
 
                 client.UdpMagicNumber = magicNumber;
                 client.UdpEnabled = true;
+                client.ServerUdpLastReceivedTime = client.GetAbsoluteTime();
 
                 client.InitializeToServerReliableUdp(client.P2PFirstFrameNumber);
 
@@ -328,6 +347,15 @@ namespace Nexum.Client
 
         private static void ProcessPendingP2PConnections(NetClient client)
         {
+            Guid magicNumber;
+            lock (client.UdpHolepunchLock)
+            {
+                if (!client.UdpEnabled)
+                    return;
+
+                magicNumber = client.UdpMagicNumber;
+            }
+
             foreach (uint hostId in client.PendingP2PConnections.Keys.ToArray())
             {
                 if (!client.PendingP2PConnections.TryRemove(hostId, out _))
@@ -337,7 +365,7 @@ namespace Nexum.Client
 
                 lock (p2pMember.P2PMutex)
                 {
-                    if (p2pMember.P2PHolepunchInitiated || p2pMember.PeerUdpChannel != null)
+                    if (p2pMember.P2PHolepunchInitiated)
                         continue;
 
                     p2pMember.P2PHolepunchInitiated = true;
@@ -345,12 +373,13 @@ namespace Nexum.Client
 
                 client.Logger.Debug("Processing pending P2P connection => hostId = {HostId}", hostId);
 
-                var magicNumber = client.UdpMagicNumber;
+                var capturedMember = p2pMember;
                 client.NexumToServerUdpIfAvailable(
                     HolepunchHelper.CreatePeerUdpServerHolepunchMessage(magicNumber, hostId), true);
-                HolepunchHelper.SendBurstMessages(
+                HolepunchHelper.SendBurstMessagesWithCheck(
                     () => HolepunchHelper.CreatePeerUdpServerHolepunchMessage(magicNumber, hostId),
-                    msg => client.NexumToServerUdpIfAvailable(msg, true)
+                    msg => client.NexumToServerUdpIfAvailable(msg, true),
+                    () => capturedMember.PeerUdpChannel == null && !capturedMember.IsClosed
                 );
             }
         }
@@ -363,44 +392,76 @@ namespace Nexum.Client
                 !message.Read(out uint hostId))
                 return;
 
-            if (!magicNumber.Equals(client.UdpMagicNumber))
-                return;
+            client.Logger.Debug(
+                "PeerUdpServerHolepunchAck => guid = {MagicNumber}, endpoint = {Endpoint}, hostId = {HostId}",
+                magicNumber,
+                selfUdpSocket,
+                hostId
+            );
 
-            if (client.P2PGroup.P2PMembers.TryGetValue(hostId, out var p2pMember))
-                Task.Run(() =>
+            IPEndPoint capturedSelfUdpSocket;
+            lock (client.UdpHolepunchLock)
+            {
+                if (!magicNumber.Equals(client.UdpMagicNumber))
                 {
-                    lock (p2pMember.P2PMutex)
+                    client.Logger.Warning(
+                        "PeerUdpServerHolepunchAck => magic number mismatch, expected {Expected}, got {Actual}",
+                        client.UdpMagicNumber, magicNumber);
+                    return;
+                }
+
+                if (client.SelfUdpSocket == null)
+                {
+                    client.Logger.Warning(
+                        "PeerUdpServerHolepunchAck => SelfUdpSocket is null, this should not happen");
+                    return;
+                }
+
+                capturedSelfUdpSocket = client.SelfUdpSocket;
+            }
+
+            if (!client.P2PGroup.P2PMembers.TryGetValue(hostId, out var p2pMember))
+            {
+                client.Logger.Warning("PeerUdpServerHolepunchAck => P2P member not found for hostId = {HostId}",
+                    hostId);
+                return;
+            }
+
+            Task.Run(() =>
+            {
+                lock (p2pMember.P2PMutex)
+                {
+                    if (p2pMember.IsClosed)
+                        return;
+
+                    int port;
+                    if (p2pMember.PeerUdpChannel != null)
                     {
-                        if (p2pMember.IsClosed)
-                            return;
-                        if (p2pMember.PeerUdpChannel != null)
-                            return;
-
+                        port = ((IPEndPoint)p2pMember.PeerUdpChannel.LocalAddress).Port;
                         client.Logger.Debug(
-                            "PeerUdpServerHolepunchAck => guid = {MagicNumber}, endpoint = {Endpoint}, hostId = {HostId}",
-                            magicNumber,
-                            selfUdpSocket,
-                            hostId
-                        );
-
-                        var tuple = client.ConnectUdp();
-
-                        p2pMember.PeerUdpChannel = tuple.Item1;
-                        p2pMember.PeerUdpEventLoopGroup = tuple.Item2;
-
-                        var peerUdpNotifyHolepunchSuccess = new NetMessage();
-                        peerUdpNotifyHolepunchSuccess.WriteEnum(MessageType.PeerUdp_NotifyHolepunchSuccess);
-
-                        p2pMember.SelfUdpLocalSocket = new IPEndPoint(client.LocalIP, tuple.Item3);
-                        peerUdpNotifyHolepunchSuccess.Write(p2pMember.SelfUdpLocalSocket);
-
-                        p2pMember.SelfUdpSocket = new IPEndPoint(client.SelfUdpSocket.Address, tuple.Item3);
-                        peerUdpNotifyHolepunchSuccess.Write(p2pMember.SelfUdpSocket);
-
-                        peerUdpNotifyHolepunchSuccess.Write(hostId);
-                        client.NexumToServer(peerUdpNotifyHolepunchSuccess);
+                            "PeerUdpServerHolepunchAck => reusing existing P2P UDP socket on port {Port}", port);
                     }
-                });
+                    else
+                    {
+                        (var channel, var workerGroup, int newPort, _) = client.ConnectUdp();
+                        p2pMember.PeerUdpChannel = channel;
+                        p2pMember.PeerUdpEventLoopGroup = workerGroup;
+                        port = newPort;
+                    }
+
+                    var peerUdpNotifyHolepunchSuccess = new NetMessage();
+                    peerUdpNotifyHolepunchSuccess.WriteEnum(MessageType.PeerUdp_NotifyHolepunchSuccess);
+
+                    p2pMember.SelfUdpLocalSocket = new IPEndPoint(client.LocalIP, port);
+                    peerUdpNotifyHolepunchSuccess.Write(p2pMember.SelfUdpLocalSocket);
+
+                    p2pMember.SelfUdpSocket = new IPEndPoint(capturedSelfUdpSocket.Address, port);
+                    peerUdpNotifyHolepunchSuccess.Write(p2pMember.SelfUdpSocket);
+
+                    peerUdpNotifyHolepunchSuccess.Write(hostId);
+                    client.NexumToServer(peerUdpNotifyHolepunchSuccess);
+                }
+            });
         }
 
         private static void PeerUdpPeerHolepunchHandler(NetClient client, NetMessage message, IPEndPoint udpEndPoint)
@@ -414,18 +475,36 @@ namespace Nexum.Client
                 return;
 
             if (!serverGuid.Equals(client.ServerGuid))
+            {
+                client.Logger.Warning(
+                    "PeerUdpPeerHolepunch => server GUID mismatch, expected {Expected}, got {Actual}",
+                    client.ServerGuid, serverGuid);
                 return;
+            }
 
             if (!client.P2PGroup.P2PMembers.TryGetValue(hostId, out var p2pMember))
+            {
+                client.Logger.Warning("PeerUdpPeerHolepunch => P2P member not found for hostId = {HostId}", hostId);
                 return;
+            }
 
             lock (p2pMember.P2PMutex)
             {
                 if (!magicNumber.Equals(client.PeerUdpMagicNumber))
+                {
+                    client.Logger.Debug(
+                        "PeerUdpPeerHolepunch => peer magic number mismatch for hostId = {HostId}, expected {Expected}, got {Actual}",
+                        hostId, client.PeerUdpMagicNumber, magicNumber);
                     return;
+                }
 
                 if (p2pMember.IsClosed || p2pMember.DirectP2P)
+                {
+                    client.Logger.Debug(
+                        "PeerUdpPeerHolepunch => skipping for hostId = {HostId}, IsClosed = {IsClosed}, DirectP2P = {DirectP2P}",
+                        hostId, p2pMember.IsClosed, p2pMember.DirectP2P);
                     return;
+                }
             }
 
             client.Logger.Debug(
@@ -436,48 +515,71 @@ namespace Nexum.Client
                 selfUdpSocket
             );
 
+            var capturedMember = p2pMember;
             Task.Run(async () =>
             {
                 bool socketsReady = await HolepunchHelper.WaitForConditionWithBackoffAsync(
-                    () => p2pMember.PeerUdpSocket != null
-                          && p2pMember.PeerUdpLocalSocket != null
-                          && p2pMember.SelfUdpSocket != null
-                          && p2pMember.SelfUdpLocalSocket != null,
-                    () => p2pMember.IsClosed || p2pMember.DirectP2P
+                    () => capturedMember.PeerUdpSocket != null
+                          && capturedMember.PeerUdpLocalSocket != null
+                          && capturedMember.SelfUdpSocket != null
+                          && capturedMember.SelfUdpLocalSocket != null,
+                    () => capturedMember.IsClosed || capturedMember.DirectP2P
                 );
 
                 if (!socketsReady)
                     return;
 
-                bool sameLan = NetUtil.IsUnicastEndpoint(p2pMember.PeerUdpLocalSocket)
-                               && NetUtil.IsUnicastEndpoint(p2pMember.SelfUdpLocalSocket)
-                               && NetUtil.IsSameLan(p2pMember.SelfUdpSocket, p2pMember.PeerUdpSocket)
-                               && NetUtil.IsSameLan(p2pMember.PeerUdpLocalSocket, p2pMember.SelfUdpLocalSocket);
+                IPEndPoint peerUdpSocket;
+                IPEndPoint peerUdpLocalSocket;
+                IPEndPoint selfUdpSocketLocal;
 
-                for (int burst = 0; burst < HolepunchConstants.BurstCount; burst++)
+                lock (capturedMember.P2PMutex)
                 {
-                    if (p2pMember.IsClosed || p2pMember.DirectP2P)
+                    if (capturedMember.IsClosed || capturedMember.DirectP2P)
                         return;
 
-                    if (sameLan)
-                        p2pMember.NexumToPeer(
-                            HolepunchHelper.CreatePeerUdpPeerHolepunchAckMessage(
-                                magicNumber, client.HostId, selfUdpSocket, udpEndPoint, p2pMember.PeerUdpLocalSocket),
-                            p2pMember.PeerUdpLocalSocket);
+                    peerUdpSocket = capturedMember.PeerUdpSocket;
+                    peerUdpLocalSocket = capturedMember.PeerUdpLocalSocket;
+                    selfUdpSocketLocal = capturedMember.SelfUdpLocalSocket;
+                }
 
-                    if (NetUtil.IsUnicastEndpoint(p2pMember.PeerUdpSocket))
-                        p2pMember.NexumToPeer(
-                            HolepunchHelper.CreatePeerUdpPeerHolepunchAckMessage(
-                                magicNumber, client.HostId, selfUdpSocket, udpEndPoint, p2pMember.PeerUdpSocket),
-                            p2pMember.PeerUdpSocket);
+                bool hasLocalEndpoint = NetUtil.IsUnicastEndpoint(peerUdpLocalSocket);
+                bool hasPublicEndpoint = NetUtil.IsUnicastEndpoint(peerUdpSocket);
+                bool sameLan = hasLocalEndpoint
+                               && NetUtil.IsUnicastEndpoint(selfUdpSocketLocal)
+                               && NetUtil.IsSameLan(capturedMember.SelfUdpSocket, peerUdpSocket)
+                               && NetUtil.IsSameLan(peerUdpLocalSocket, selfUdpSocketLocal);
 
-                    p2pMember.NexumToPeer(
+                for (int burst = 0; burst < HolepunchConfig.BurstCount; burst++)
+                {
+                    if (capturedMember.IsClosed || capturedMember.DirectP2P)
+                        return;
+
+                    capturedMember.NexumToPeer(
                         HolepunchHelper.CreatePeerUdpPeerHolepunchAckMessage(
                             magicNumber, client.HostId, selfUdpSocket, udpEndPoint, udpEndPoint),
                         udpEndPoint);
 
-                    if (burst < HolepunchConstants.BurstCount - 1)
-                        await Task.Delay(HolepunchConstants.BurstDelayMs);
+                    if (sameLan && hasLocalEndpoint)
+                        capturedMember.NexumToPeer(
+                            HolepunchHelper.CreatePeerUdpPeerHolepunchAckMessage(
+                                magicNumber, client.HostId, selfUdpSocket, udpEndPoint, peerUdpLocalSocket),
+                            peerUdpLocalSocket);
+
+                    if (hasPublicEndpoint)
+                        capturedMember.NexumToPeer(
+                            HolepunchHelper.CreatePeerUdpPeerHolepunchAckMessage(
+                                magicNumber, client.HostId, selfUdpSocket, udpEndPoint, peerUdpSocket),
+                            peerUdpSocket);
+
+                    if (!sameLan && hasLocalEndpoint)
+                        capturedMember.NexumToPeer(
+                            HolepunchHelper.CreatePeerUdpPeerHolepunchAckMessage(
+                                magicNumber, client.HostId, selfUdpSocket, udpEndPoint, peerUdpLocalSocket),
+                            peerUdpLocalSocket);
+
+                    if (burst < HolepunchConfig.BurstCount - 1)
+                        await Task.Delay(HolepunchConfig.BurstDelayMs);
                 }
             });
         }
@@ -495,38 +597,49 @@ namespace Nexum.Client
                 || !message.ReadIPEndPoint(ref endpointC))
                 return;
 
-            if (client.P2PGroup.P2PMembers.TryGetValue(hostId, out var p2pMember))
+            if (!client.P2PGroup.P2PMembers.TryGetValue(hostId, out var p2pMember))
+            {
+                client.Logger.Warning("PeerUdpPeerHolepunchAck => P2P member not found for hostId = {HostId}", hostId);
+                return;
+            }
+
+            lock (p2pMember.P2PMutex)
             {
                 if (!magicNumber.Equals(p2pMember.PeerUdpMagicNumber))
-                    return;
-
-                lock (p2pMember.P2PMutex)
                 {
-                    if (p2pMember.P2PHolepunchNotified)
-                        return;
-
-                    p2pMember.P2PHolepunchNotified = true;
+                    client.Logger.Debug(
+                        "PeerUdpPeerHolepunchAck => magic number mismatch for hostId = {HostId}, expected {Expected}, got {Actual}",
+                        hostId, p2pMember.PeerUdpMagicNumber, magicNumber);
+                    return;
                 }
 
-                client.Logger.Debug(
-                    "PeerUdpPeerHolepunchAck => guid = {MagicNumber}, hostId = {HostId}, endpointA = {EndpointA}, endpointB = {EndpointB}, endpointC = {EndpointC}",
-                    magicNumber,
-                    hostId,
-                    endpointA,
-                    endpointB,
-                    endpointC
-                );
+                if (p2pMember.P2PHolepunchNotified)
+                {
+                    client.Logger.Debug("PeerUdpPeerHolepunchAck => already notified for hostId = {HostId}", hostId);
+                    return;
+                }
 
-                var notifyP2PHolepunchSuccess = new NetMessage();
-                notifyP2PHolepunchSuccess.Write(client.HostId);
-                notifyP2PHolepunchSuccess.Write(hostId);
-                notifyP2PHolepunchSuccess.Write(endpointA);
-                notifyP2PHolepunchSuccess.Write(endpointB);
-                notifyP2PHolepunchSuccess.Write(endpointC);
-                notifyP2PHolepunchSuccess.Write(udpEndPoint);
-
-                client.RmiToServer((ushort)NexumOpCode.NotifyP2PHolepunchSuccess, notifyP2PHolepunchSuccess);
+                p2pMember.P2PHolepunchNotified = true;
             }
+
+            client.Logger.Debug(
+                "PeerUdpPeerHolepunchAck => guid = {MagicNumber}, hostId = {HostId}, endpointA = {EndpointA}, endpointB = {EndpointB}, endpointC = {EndpointC}",
+                magicNumber,
+                hostId,
+                endpointA,
+                endpointB,
+                endpointC
+            );
+
+            var notifyP2PHolepunchSuccess = new NetMessage();
+            notifyP2PHolepunchSuccess.Write(client.HostId);
+            notifyP2PHolepunchSuccess.Write(hostId);
+            notifyP2PHolepunchSuccess.Write(endpointA);
+            notifyP2PHolepunchSuccess.Write(endpointB);
+            notifyP2PHolepunchSuccess.Write(endpointC);
+            notifyP2PHolepunchSuccess.Write(udpEndPoint);
+
+            client.RmiToServer((ushort)NexumOpCode.NotifyP2PHolepunchSuccess, notifyP2PHolepunchSuccess);
         }
 
         private static void P2PRequestIndirectServerTimeAndPingHandler(NetClient client, NetMessage message,
@@ -535,26 +648,27 @@ namespace Nexum.Client
             if (!message.Read(out double time))
                 return;
 
-            P2PMember p2pMember = null;
-            if (client.P2PGroup?.P2PMembers != null)
-                foreach (var member in client.P2PGroup.P2PMembers.Values)
-                    if (member.PeerRemoteToLocalSocket?.Equals(udpEndPoint) ?? false)
-                    {
-                        p2pMember = member;
-                        break;
-                    }
+            message.Read(out int paddingSize);
 
+            var p2pMember = client.P2PGroup?.FindMember(client.HostId, udpEndPoint);
             if (p2pMember != null)
             {
+                p2pMember.LastUdpReceivedTime = client.GetAbsoluteTime();
+
                 var p2pReplyIndirectServerTimeAndPong = new NetMessage();
                 p2pReplyIndirectServerTimeAndPong.WriteEnum(MessageType.P2PReplyIndirectServerTimeAndPong);
                 p2pReplyIndirectServerTimeAndPong.Write(time);
+
+                p2pReplyIndirectServerTimeAndPong.Write(paddingSize);
+                if (paddingSize > 0)
+                    p2pReplyIndirectServerTimeAndPong.WriteZeroes(paddingSize);
+
                 p2pMember.NexumToPeer(p2pReplyIndirectServerTimeAndPong);
             }
             else
             {
-                client.Logger.Warning(
-                    "Recieved P2PRequestIndirectServerTimeAndPing from unknown IP => {UdpEndpoint}",
+                client.Logger.Verbose(
+                    "Received P2PRequestIndirectServerTimeAndPing from unknown source => udpEndPoint = {UdpEndPoint}",
                     udpEndPoint
                 );
             }
@@ -566,15 +680,9 @@ namespace Nexum.Client
             if (!message.Read(out double sentTime))
                 return;
 
-            P2PMember p2pMember = null;
-            if (client.P2PGroup?.P2PMembers != null)
-                foreach (var member in client.P2PGroup.P2PMembers.Values)
-                    if (member.PeerRemoteToLocalSocket?.Equals(udpEndPoint) ?? false)
-                    {
-                        p2pMember = member;
-                        break;
-                    }
+            message.Read(out int paddingSize);
 
+            var p2pMember = client.P2PGroup?.FindMember(client.HostId, udpEndPoint);
             if (p2pMember != null)
             {
                 double currentTime = client.GetAbsoluteTime();
@@ -584,14 +692,18 @@ namespace Nexum.Client
                     lastPing = 0;
 
                 p2pMember.LastPing = lastPing;
+                p2pMember.LastUdpReceivedTime = currentTime;
                 p2pMember.RecentPing = p2pMember.RecentPing != 0.0
                     ? Core.SysUtil.Lerp(p2pMember.RecentPing, lastPing, ReliableUdpConfig.LagLinearProgrammingFactor)
                     : lastPing;
+
+                if (paddingSize > 0)
+                    p2pMember.MtuDiscovery.OnPongReceived(paddingSize, currentTime);
             }
             else
             {
-                client.Logger.Warning(
-                    "Recieved P2PReplyIndirectServerTimeAndPong from unknown IP => {UdpEndpoint}",
+                client.Logger.Verbose(
+                    "Received P2PReplyIndirectServerTimeAndPong from unknown source => udpEndPoint = {UdpEndPoint}",
                     udpEndPoint
                 );
             }
@@ -614,50 +726,39 @@ namespace Nexum.Client
                     || !message.Read(ref byteArray3)
                     || !message.Read(out uint p2pFirstFrameNumber)
                     || !message.Read(out Guid peerUdpMagicNumber)
-                    || !message.Read(out bool _)
-                    || !message.Read(out ushort _))
+                    || !message.Read(out bool enableDirectP2P)
+                    || !message.Read(out int bindPort))
                     return;
 
                 ProcessP2PGroupMemberJoin(client, groupHostId, memberId, eventId, peerUdpMagicNumber,
-                    p2pFirstFrameNumber, "P2PGroup_MemberJoin");
+                    p2pFirstFrameNumber, enableDirectP2P, bindPort, "P2PGroup_MemberJoin");
             }
             else
             {
                 if (!message.Read(out uint eventId)
                     || !message.Read(out uint p2pFirstFrameNumber)
                     || !message.Read(out Guid peerUdpMagicNumber)
-                    || !message.Read(out bool _)
-                    || !message.Read(out ushort _))
+                    || !message.Read(out bool enableDirectP2P)
+                    || !message.Read(out int bindPort))
                     return;
 
                 ProcessP2PGroupMemberJoin(client, groupHostId, memberId, eventId, peerUdpMagicNumber,
-                    p2pFirstFrameNumber, "P2PGroup_MemberJoin_Unencrypted");
+                    p2pFirstFrameNumber, enableDirectP2P, bindPort, "P2PGroup_MemberJoin_Unencrypted");
             }
         }
 
         private static void ProcessP2PGroupMemberJoin(NetClient client, uint groupHostId, uint memberId, uint eventId,
-            Guid peerUdpMagicNumber, uint p2pFirstFrameNumber, string logName)
+            Guid peerUdpMagicNumber, uint p2pFirstFrameNumber, bool enableDirectP2P, int bindPort, string logName)
         {
             client.Logger.Information(
-                "{LogName} => memberId = {MemberId}, groupHostId = {GroupHostId}, eventId = {EventId}",
-                logName, memberId, groupHostId, eventId);
+                "{LogName} => memberId = {MemberId}, groupHostId = {GroupHostId}, eventId = {EventId}, enableDirectP2P = {EnableDirectP2P}, bindPort = {BindPort}",
+                logName, memberId, groupHostId, eventId, enableDirectP2P, bindPort);
 
             if (memberId == client.HostId)
             {
-                Task.Run(() =>
-                {
-                    if (client.UdpChannel != null)
-                        client.CloseUdp();
-
-                    var tuple = client.ConnectUdp();
-                    client.UdpChannel = tuple.Item1;
-                    client.UdpEventLoopGroup = tuple.Item2;
-                });
-
                 client.P2PGroup.HostId = groupHostId;
                 client.PeerUdpMagicNumber = peerUdpMagicNumber;
                 client.P2PFirstFrameNumber = p2pFirstFrameNumber;
-                client.RmiToServer((ushort)NexumOpCode.C2S_RequestCreateUdpSocket, new NetMessage());
 
                 client.StartReliableUdpLoop();
             }
@@ -665,21 +766,97 @@ namespace Nexum.Client
             {
                 var newMember = new P2PMember(client, client.P2PGroup.HostId, memberId)
                 {
-                    PeerUdpMagicNumber = peerUdpMagicNumber
+                    PeerUdpMagicNumber = peerUdpMagicNumber,
+                    EnableDirectP2P = enableDirectP2P,
+                    PeerBindPort = bindPort
                 };
 
-                newMember.InitializeReliableUdp(p2pFirstFrameNumber);
-                newMember.UdpDefragBoard.MaxMessageLength = client.NetSettings?.MessageMaxLength ?? 2097152;
+                newMember.InitializeReliableUdp(client.P2PFirstFrameNumber, p2pFirstFrameNumber);
+                newMember.UdpDefragBoard.MaxMessageLength =
+                    client.NetSettings?.MessageMaxLength ?? NetConfig.MessageMaxLength;
 
-                client.P2PGroup.P2PMembers.TryAdd(memberId, newMember);
+                if (!enableDirectP2P)
+                {
+                    client.Logger.Debug(
+                        "ProcessP2PGroupMemberJoin => skipping P2P UDP socket creation for hostId = {HostId}, enableDirectP2P = false",
+                        memberId);
+                    client.P2PGroup.P2PMembers.TryAdd(memberId, newMember);
+
+                    var joinAckNoP2P = new NetMessage();
+                    joinAckNoP2P.Write(groupHostId);
+                    joinAckNoP2P.Write(memberId);
+                    joinAckNoP2P.Write(eventId);
+                    joinAckNoP2P.Write(false);
+                    client.RmiToServer((ushort)NexumOpCode.P2PGroup_MemberJoin_Ack, joinAckNoP2P);
+                }
+                else
+                {
+                    int? targetPort = bindPort > 0 ? bindPort : null;
+                    if (targetPort.HasValue)
+                        client.AimForPort = (ushort)targetPort.Value;
+
+                    client.P2PGroup.P2PMembers.TryAdd(memberId, newMember);
+
+                    Task.Run(() =>
+                    {
+                        bool localPortReuseSuccess = false;
+                        try
+                        {
+                            lock (newMember.P2PMutex)
+                            {
+                                if (newMember.IsClosed || newMember.PeerUdpChannel != null)
+                                {
+                                    var joinAckEarly = new NetMessage();
+                                    joinAckEarly.Write(groupHostId);
+                                    joinAckEarly.Write(memberId);
+                                    joinAckEarly.Write(eventId);
+                                    joinAckEarly.Write(false);
+                                    client.RmiToServer((ushort)NexumOpCode.P2PGroup_MemberJoin_Ack, joinAckEarly);
+                                    return;
+                                }
+
+                                (var channel, var workerGroup, int port, _) = client.ConnectUdp(targetPort);
+                                newMember.PeerUdpChannel = channel;
+                                newMember.PeerUdpEventLoopGroup = workerGroup;
+                                newMember.SelfUdpLocalSocket = new IPEndPoint(client.LocalIP, port);
+
+                                if (bindPort != 0 && port == bindPort)
+                                {
+                                    localPortReuseSuccess = true;
+                                    newMember.LocalPortReuseSuccess = true;
+                                }
+
+                                client.Logger.Debug(
+                                    "ProcessP2PGroupMemberJoin => created P2P UDP socket for hostId = {HostId}, port = {Port}, localPortReuseSuccess = {LocalPortReuseSuccess}",
+                                    memberId, port, localPortReuseSuccess);
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            client.Logger.Error(ex,
+                                "ProcessP2PGroupMemberJoin => failed to create P2P UDP socket for hostId = {HostId}",
+                                memberId);
+                        }
+
+                        var joinAck = new NetMessage();
+                        joinAck.Write(groupHostId);
+                        joinAck.Write(memberId);
+                        joinAck.Write(eventId);
+                        joinAck.Write(localPortReuseSuccess);
+                        client.RmiToServer((ushort)NexumOpCode.P2PGroup_MemberJoin_Ack, joinAck);
+                    });
+                }
             }
 
-            var joinAck = new NetMessage();
-            joinAck.Write(groupHostId);
-            joinAck.Write(memberId);
-            joinAck.Write(eventId);
-            joinAck.Write(false);
-            client.RmiToServer((ushort)NexumOpCode.P2PGroup_MemberJoin_Ack, joinAck);
+            if (memberId == client.HostId)
+            {
+                var joinAck = new NetMessage();
+                joinAck.Write(groupHostId);
+                joinAck.Write(memberId);
+                joinAck.Write(eventId);
+                joinAck.Write(false);
+                client.RmiToServer((ushort)NexumOpCode.P2PGroup_MemberJoin_Ack, joinAck);
+            }
         }
 
         private static void RMIHandler(NetClient client, NetMessage message, IPEndPoint udpEndPoint)
@@ -725,6 +902,14 @@ namespace Nexum.Client
                         memberId,
                         (ErrorType)reason
                     );
+
+                    if (client.P2PGroup.P2PMembers.TryGetValue(memberId, out var p2pMember))
+                        p2pMember.HandleRemoteDisconnect();
+                    else
+                        client.Logger.Warning(
+                            "P2P_NotifyDirectP2PDisconnected2 => P2P member not found for hostId = {HostId}",
+                            memberId);
+
                     break;
                 }
 
@@ -736,19 +921,45 @@ namespace Nexum.Client
 
                     client.Logger.Debug("S2C_RequestCreateUdpSocket => {UdpSocket}", udpSocket);
 
-                    Task.Run(() =>
+                    client.ServerUdpSocket = udpSocket;
+
+                    if (client.UdpChannel != null)
                     {
-                        if (client.UdpChannel != null)
-                            client.CloseUdp();
-
-                        var tuple = client.ConnectUdp();
-                        client.UdpChannel = tuple.Item1;
-                        client.UdpEventLoopGroup = tuple.Item2;
-
+                        client.Logger.Debug("S2C_RequestCreateUdpSocket => UDP socket already exists, sending ack");
                         var ack = new NetMessage();
                         ack.Write(true);
-
                         client.RmiToServer((ushort)NexumOpCode.C2S_CreateUdpSocketAck, ack);
+                        return;
+                    }
+
+                    Task.Run(() =>
+                    {
+                        try
+                        {
+                            if (client.UdpChannel != null)
+                            {
+                                var ack = new NetMessage();
+                                ack.Write(true);
+                                client.RmiToServer((ushort)NexumOpCode.C2S_CreateUdpSocketAck, ack);
+                                return;
+                            }
+
+                            var (channel, workerGroup, _, _) = client.ConnectUdp();
+                            client.UdpChannel = channel;
+                            client.UdpEventLoopGroup = workerGroup;
+                            client.ServerUdpReadyWaiting = false;
+
+                            var ackMsg = new NetMessage();
+                            ackMsg.Write(true);
+
+                            client.RmiToServer((ushort)NexumOpCode.C2S_CreateUdpSocketAck, ackMsg);
+                        }
+                        catch (Exception ex)
+                        {
+                            client.Logger.Error(ex, "S2C_RequestCreateUdpSocket => failed to create UDP socket");
+                            client.ServerUdpSocketFailed = true;
+                            client.ServerUdpReadyWaiting = false;
+                        }
                     });
 
                     break;
@@ -757,14 +968,50 @@ namespace Nexum.Client
                 case NexumOpCode.S2C_CreateUdpSocketAck:
                 {
                     if (!message.Read(out bool result) || !result)
+                    {
+                        client.ServerUdpReadyWaiting = false;
                         return;
+                    }
 
                     var udpSocket = new IPEndPoint(IPAddress.Loopback, IPEndPoint.MinPort);
                     if (!message.ReadStringEndPoint(ref udpSocket))
+                    {
+                        client.ServerUdpReadyWaiting = false;
                         return;
+                    }
 
                     client.Logger.Information("S2C_CreateUdpSocketAck => {UdpSocket}", udpSocket);
+
                     client.ServerUdpSocket = udpSocket;
+
+                    if (client.UdpChannel == null && !client.ServerUdpSocketFailed)
+                        Task.Run(() =>
+                        {
+                            try
+                            {
+                                if (client.UdpChannel != null)
+                                {
+                                    client.ServerUdpReadyWaiting = false;
+                                    return;
+                                }
+
+                                var (channel, workerGroup, _, _) = client.ConnectUdp();
+                                client.UdpChannel = channel;
+                                client.UdpEventLoopGroup = workerGroup;
+                                client.ServerUdpReadyWaiting = false;
+
+                                client.Logger.Debug("S2C_CreateUdpSocketAck => UDP socket created");
+                            }
+                            catch (Exception ex)
+                            {
+                                client.Logger.Error(ex, "S2C_CreateUdpSocketAck => failed to create UDP socket");
+                                client.ServerUdpSocketFailed = true;
+                                client.ServerUdpReadyWaiting = false;
+                            }
+                        });
+                    else
+                        client.ServerUdpReadyWaiting = false;
+
                     break;
                 }
 
@@ -786,21 +1033,35 @@ namespace Nexum.Client
                 {
                     if (!message.Read(out uint hostId))
                         return;
-                    if (!client.UdpEnabled)
-                    {
-                        if (client.PendingP2PConnections.TryAdd(hostId, 0))
-                            client.Logger.Debug(
-                                "NewDirectP2PConnection => hostId = {HostId}, queueing - UDP not enabled yet", hostId);
 
-                        return;
+                    Guid magicNumber;
+                    lock (client.UdpHolepunchLock)
+                    {
+                        if (!client.UdpEnabled)
+                        {
+                            if (client.PendingP2PConnections.TryAdd(hostId, 0))
+                                client.Logger.Debug(
+                                    "NewDirectP2PConnection => hostId = {HostId}, queueing - UDP not enabled yet",
+                                    hostId);
+
+                            return;
+                        }
+
+                        magicNumber = client.UdpMagicNumber;
                     }
 
                     if (!client.P2PGroup.P2PMembers.TryGetValue(hostId, out var targetMember))
+                    {
+                        client.Logger.Warning("NewDirectP2PConnection => P2P member not found for hostId = {HostId}",
+                            hostId);
                         return;
+                    }
+
+                    client.Logger.Debug("NewDirectP2PConnection => hostId = {HostId}", hostId);
 
                     lock (targetMember.P2PMutex)
                     {
-                        if (targetMember.P2PHolepunchInitiated || targetMember.PeerUdpChannel != null)
+                        if (targetMember.P2PHolepunchInitiated)
                         {
                             client.Logger.Debug(
                                 "NewDirectP2PConnection => hostId = {HostId}, skipping - holepunch already in progress",
@@ -811,27 +1072,19 @@ namespace Nexum.Client
                         targetMember.P2PHolepunchInitiated = true;
                     }
 
-                    client.Logger.Debug("NewDirectP2PConnection => hostId = {HostId}", hostId);
                     var msg = new NetMessage();
                     msg.WriteEnum(MessageType.PeerUdp_ServerHolepunch);
-                    msg.Write(client.UdpMagicNumber);
+                    msg.Write(magicNumber);
                     msg.Write(hostId);
 
                     client.NexumToServerUdpIfAvailable(msg, true);
-                    Task.Run(async () =>
-                    {
-                        for (int i = 0; i < HolepunchConstants.BurstCount; i++)
-                        {
-                            await Task.Delay(HolepunchConstants.BurstDelayMs);
-
-                            var burstMsg = new NetMessage();
-                            burstMsg.WriteEnum(MessageType.PeerUdp_ServerHolepunch);
-                            burstMsg.Write(client.UdpMagicNumber);
-                            burstMsg.Write(hostId);
-
-                            client.NexumToServerUdpIfAvailable(burstMsg, true);
-                        }
-                    });
+                    uint capturedHostId = hostId;
+                    var capturedMember = targetMember;
+                    HolepunchHelper.SendBurstMessagesWithCheck(
+                        () => HolepunchHelper.CreatePeerUdpServerHolepunchMessage(magicNumber, capturedHostId),
+                        burstMsg => client.NexumToServerUdpIfAvailable(burstMsg, true),
+                        () => capturedMember.PeerUdpChannel == null && !capturedMember.IsClosed
+                    );
                     break;
                 }
 
@@ -846,71 +1099,79 @@ namespace Nexum.Client
                     if (!message.ReadIPEndPoint(ref localEndpoint) || !message.ReadIPEndPoint(ref remoteEndpoint))
                         return;
 
-                    if (!client.P2PGroup.P2PMembers.TryGetValue(hostId, out var p2pMember))
-                        break;
-
-                    lock (p2pMember.P2PMutex)
-                    {
-                        if (p2pMember.P2PHolepunchStarted || p2pMember.DirectP2P)
-                            break;
-
-                        p2pMember.P2PHolepunchStarted = true;
-                        p2pMember.PeerUdpSocket = remoteEndpoint;
-                        p2pMember.PeerUdpLocalSocket = localEndpoint;
-                    }
-
                     client.Logger.Debug(
                         "RequestP2PHolepunch => hostId = {HostId}, localEndpoint = {LocalEndpoint}, remoteEndpoint = {RemoteEndpoint}",
                         hostId, localEndpoint, remoteEndpoint);
 
+                    if (!client.P2PGroup.P2PMembers.TryGetValue(hostId, out var p2pMember))
+                    {
+                        client.Logger.Warning("RequestP2PHolepunch => P2P member not found for hostId = {HostId}",
+                            hostId);
+                        break;
+                    }
+
+                    Guid capturedPeerMagicNumber;
+
+                    lock (p2pMember.P2PMutex)
+                    {
+                        if (p2pMember.P2PHolepunchStarted || p2pMember.DirectP2P)
+                        {
+                            client.Logger.Debug(
+                                "RequestP2PHolepunch => skipping for hostId = {HostId}, P2PHolepunchStarted = {Started}, DirectP2P = {DirectP2P}",
+                                hostId, p2pMember.P2PHolepunchStarted, p2pMember.DirectP2P);
+                            break;
+                        }
+
+                        p2pMember.P2PHolepunchStarted = true;
+                        p2pMember.PeerUdpSocket = remoteEndpoint;
+                        p2pMember.PeerUdpLocalSocket = localEndpoint;
+                        capturedPeerMagicNumber = p2pMember.PeerUdpMagicNumber;
+                    }
+
+                    var capturedMember = p2pMember;
                     Task.Run(async () =>
                     {
                         bool channelReady = await HolepunchHelper.WaitForConditionWithBackoffAsync(
-                            () => p2pMember.PeerUdpChannel != null,
-                            () => p2pMember.IsClosed || p2pMember.DirectP2P
+                            () => capturedMember.PeerUdpChannel != null,
+                            () => capturedMember.IsClosed || capturedMember.DirectP2P
                         );
 
                         if (!channelReady)
                             return;
 
-                        bool tryLocalFirst = NetUtil.IsUnicastEndpoint(p2pMember.PeerUdpLocalSocket)
-                                             && NetUtil.IsUnicastEndpoint(p2pMember.PeerUdpSocket)
-                                             && NetUtil.IsSameLan(p2pMember.PeerUdpLocalSocket,
-                                                 p2pMember.PeerUdpSocket);
+                        bool hasLocalEndpoint = NetUtil.IsUnicastEndpoint(localEndpoint);
+                        bool hasPublicEndpoint = NetUtil.IsUnicastEndpoint(remoteEndpoint);
+                        bool sameLan = hasLocalEndpoint && hasPublicEndpoint &&
+                                       NetUtil.IsSameLan(localEndpoint, remoteEndpoint);
 
-                        if (tryLocalFirst && NetUtil.IsUnicastEndpoint(p2pMember.PeerUdpLocalSocket))
-                            p2pMember.NexumToPeer(
-                                HolepunchHelper.CreatePeerUdpPeerHolepunchMessage(
-                                    client.HostId, p2pMember.PeerUdpMagicNumber, client.ServerGuid,
-                                    p2pMember.PeerUdpLocalSocket),
-                                p2pMember.PeerUdpLocalSocket);
-
-                        if (NetUtil.IsUnicastEndpoint(p2pMember.PeerUdpSocket))
-                            p2pMember.NexumToPeer(
-                                HolepunchHelper.CreatePeerUdpPeerHolepunchMessage(
-                                    client.HostId, p2pMember.PeerUdpMagicNumber, client.ServerGuid,
-                                    p2pMember.PeerUdpSocket),
-                                p2pMember.PeerUdpSocket);
-
-                        for (int burst = 0; burst < HolepunchConstants.BurstCount; burst++)
+                        for (int burst = 0; burst < HolepunchConfig.BurstCount; burst++)
                         {
-                            await Task.Delay(HolepunchConstants.BurstDelayMs);
-                            if (p2pMember.IsClosed || p2pMember.DirectP2P)
+                            if (capturedMember.IsClosed || capturedMember.DirectP2P)
                                 return;
 
-                            if (NetUtil.IsUnicastEndpoint(p2pMember.PeerUdpSocket))
-                                p2pMember.NexumToPeer(
+                            if (sameLan && hasLocalEndpoint)
+                                capturedMember.NexumToPeer(
                                     HolepunchHelper.CreatePeerUdpPeerHolepunchMessage(
-                                        client.HostId, p2pMember.PeerUdpMagicNumber, client.ServerGuid,
-                                        p2pMember.PeerUdpSocket),
-                                    p2pMember.PeerUdpSocket);
+                                        client.HostId, capturedPeerMagicNumber, client.ServerGuid,
+                                        localEndpoint),
+                                    localEndpoint);
 
-                            if (NetUtil.IsUnicastEndpoint(p2pMember.PeerUdpLocalSocket))
-                                p2pMember.NexumToPeer(
+                            if (hasPublicEndpoint)
+                                capturedMember.NexumToPeer(
                                     HolepunchHelper.CreatePeerUdpPeerHolepunchMessage(
-                                        client.HostId, p2pMember.PeerUdpMagicNumber, client.ServerGuid,
-                                        p2pMember.PeerUdpLocalSocket),
-                                    p2pMember.PeerUdpLocalSocket);
+                                        client.HostId, capturedPeerMagicNumber, client.ServerGuid,
+                                        remoteEndpoint),
+                                    remoteEndpoint);
+
+                            if (!sameLan && hasLocalEndpoint)
+                                capturedMember.NexumToPeer(
+                                    HolepunchHelper.CreatePeerUdpPeerHolepunchMessage(
+                                        client.HostId, capturedPeerMagicNumber, client.ServerGuid,
+                                        localEndpoint),
+                                    localEndpoint);
+
+                            if (burst < HolepunchConfig.BurstCount - 1)
+                                await Task.Delay(HolepunchConfig.BurstDelayMs);
                         }
                     });
 
@@ -944,9 +1205,14 @@ namespace Nexum.Client
                         lock (p2pMember.P2PMutex)
                         {
                             if (p2pMember.DirectP2P)
+                            {
+                                client.Logger.Debug(
+                                    "NotifyDirectP2PEstablish => already established with hostId = {HostId}", hostIdB);
                                 return;
+                            }
 
                             p2pMember.DirectP2P = true;
+                            p2pMember.LastUdpReceivedTime = client.GetAbsoluteTime();
                             p2pMember.PeerLocalToRemoteSocket = endpointA;
                             p2pMember.PeerRemoteToLocalSocket = endpointD;
                             p2pMember.SelfLocalToRemoteSocket = endpointC;
@@ -976,20 +1242,35 @@ namespace Nexum.Client
                     if (!message.Read(out uint hostId))
                         return;
 
-                    client.Logger.Debug("RenewP2PConnectionState => hostId = {HostId}", hostId);
-
                     if (client.P2PGroup.P2PMembers.TryGetValue(hostId, out var p2pMember))
                     {
+                        client.Logger.Debug("RenewP2PConnectionState => hostId = {HostId}", hostId);
+
                         lock (p2pMember.P2PMutex)
                         {
                             p2pMember.DirectP2P = false;
                             p2pMember.Close();
+                            p2pMember.IsClosed = false;
                         }
 
-                        var notify = new NetMessage();
-                        notify.Write(hostId);
+                        Task.Run(() =>
+                        {
+                            lock (p2pMember.P2PMutex)
+                            {
+                                if (p2pMember.PeerUdpChannel == null)
+                                {
+                                    (var channel, var workerGroup, int port, _) = client.ConnectUdp();
+                                    p2pMember.PeerUdpChannel = channel;
+                                    p2pMember.PeerUdpEventLoopGroup = workerGroup;
+                                    client.Logger.Debug(
+                                        "RenewP2PConnectionState => pre-created P2P UDP socket on port {Port}", port);
+                                }
+                            }
 
-                        client.RmiToServer((ushort)NexumOpCode.NotifyJitDirectP2PTriggered, notify);
+                            var notify = new NetMessage();
+                            notify.Write(hostId);
+                            client.RmiToServer((ushort)NexumOpCode.NotifyJitDirectP2PTriggered, notify);
+                        });
                     }
 
                     break;
@@ -1007,23 +1288,7 @@ namespace Nexum.Client
                     message.Read(out double time);
                     message.Read(out double frameRate);
 
-                    P2PMember p2pMember = null;
-
-                    if (udpEndPoint != null)
-                    {
-                        if (client.P2PGroup?.P2PMembers != null)
-                            foreach (var member in client.P2PGroup.P2PMembers.Values)
-                                if (member.PeerRemoteToLocalSocket?.Equals(udpEndPoint) ?? false)
-                                {
-                                    p2pMember = member;
-                                    break;
-                                }
-                    }
-                    else
-                    {
-                        client.P2PGroup.P2PMembers.TryGetValue(message.RelayFrom, out p2pMember);
-                    }
-
+                    var p2pMember = client.P2PGroup?.FindMember(client.HostId, udpEndPoint, 0, message.RelayFrom);
                     if (p2pMember != null)
                     {
                         var selfPing = new NetMessage();
@@ -1044,23 +1309,7 @@ namespace Nexum.Client
                     message.Read(out double serverPing);
                     message.Read(out double frameRate);
 
-                    P2PMember p2pMember = null;
-
-                    if (udpEndPoint != null)
-                    {
-                        if (client.P2PGroup?.P2PMembers != null)
-                            foreach (var member in client.P2PGroup.P2PMembers.Values)
-                                if (member.PeerRemoteToLocalSocket?.Equals(udpEndPoint) ?? false)
-                                {
-                                    p2pMember = member;
-                                    break;
-                                }
-                    }
-                    else
-                    {
-                        client.P2PGroup.P2PMembers.TryGetValue(message.RelayFrom, out p2pMember);
-                    }
-
+                    var p2pMember = client.P2PGroup?.FindMember(client.HostId, udpEndPoint, 0, message.RelayFrom);
                     if (p2pMember != null)
                     {
                         var selfPong = new NetMessage();
@@ -1077,7 +1326,7 @@ namespace Nexum.Client
                 }
 
                 default:
-                    client.OnRMIRecieve(message, rmiId);
+                    client.OnRMIReceive(message, rmiId);
                     break;
             }
         }
@@ -1223,7 +1472,7 @@ namespace Nexum.Client
 
         private static void UnreliablePongHandler(NetClient client, NetMessage message)
         {
-            if (!message.Read(out double sentTime) || !message.Read(out double _))
+            if (!message.Read(out double sentTime) || !message.Read(out double serverTime))
                 return;
 
             double currentTime = client.GetAbsoluteTime();
@@ -1233,9 +1482,16 @@ namespace Nexum.Client
                 lastPing = 0;
 
             client.ServerUdpLastPing = lastPing;
+            client.ServerUdpLastReceivedTime = currentTime;
             client.ServerUdpRecentPing = client.ServerUdpRecentPing != 0.0
                 ? Core.SysUtil.Lerp(client.ServerUdpRecentPing, lastPing, ReliableUdpConfig.LagLinearProgrammingFactor)
                 : lastPing;
+
+            double estimatedServerTime = serverTime + client.ServerUdpRecentPing;
+            client.ServerTimeDiff = currentTime - estimatedServerTime;
+
+            if (message.Read(out int paddingSize) && paddingSize > 0)
+                client.ServerMtuDiscovery.OnPongReceived(paddingSize, currentTime);
         }
 
         private static void EncryptedHandler(NetClient client, NetMessage message)

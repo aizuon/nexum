@@ -31,7 +31,7 @@ namespace TestServer
                 .CreateLogger();
 
             var server = new NetServer(ServerType.Relay);
-            server.OnRMIRecieve += (session, message, rmiId) =>
+            server.OnRMIReceive += (session, message, rmiId) =>
             {
                 switch (rmiId)
                 {

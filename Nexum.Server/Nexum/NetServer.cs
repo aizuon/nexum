@@ -20,13 +20,13 @@ namespace Nexum.Server
 {
     public class NetServer : NetCore
     {
-        public delegate void OnRMIRecieveDelegate(NetSession session, NetMessage message, ushort rmiId);
+        public delegate void OnRMIReceiveDelegate(NetSession session, NetMessage message, ushort rmiId);
 
         private static readonly TimeSpan UdpSetupRetryInterval =
-            TimeSpan.FromSeconds(HolepunchConstants.UdpSetupRetrySeconds);
+            TimeSpan.FromSeconds(HolepunchConfig.UdpSetupRetrySeconds);
 
         private static readonly TimeSpan
-            UdpPingTimeout = TimeSpan.FromSeconds(HolepunchConstants.UdpPingTimeoutSeconds);
+            UdpPingTimeout = TimeSpan.FromSeconds(HolepunchConfig.UdpPingTimeoutSeconds);
 
         private static readonly IPEndPoint DummyEndPoint = new IPEndPoint(IPAddress.Parse("255.255.255.255"), 65535);
         private readonly object _udpSocketsCacheLock = new object();
@@ -34,7 +34,7 @@ namespace Nexum.Server
         private ThreadLoop _reliableUdpLoop;
         private UdpSocket[] _udpSocketsCache;
 
-        public OnRMIRecieveDelegate OnRMIRecieve = (session, message, rmiId) => { };
+        public OnRMIReceiveDelegate OnRMIReceive = (session, message, rmiId) => { };
 
         public NetServer(ServerType serverType, NetSettings netSettings = null,
             bool allowDirectP2P = true)
@@ -81,8 +81,6 @@ namespace Nexum.Server
         };
 
         internal Guid ServerGuid { get; } = new Guid("4DF3B4FA-0729-4459-9674-19EFEF5DF825");
-
-        internal Random Random { get; } = new Random();
 
         internal IPAddress IPAddress { get; set; }
 
@@ -168,14 +166,14 @@ namespace Nexum.Server
             UdpSockets.Clear();
 
             foreach (var session in SessionsInternal.Values)
-                session.Channel?.CloseAsync().Wait();
+                session.Channel?.CloseAsync();
             SessionsInternal.Clear();
             MagicNumberSessions.Clear();
             UdpSessions.Clear();
 
-            Channel?.CloseAsync().Wait();
+            Channel?.CloseAsync();
             Channel = null;
-            EventLoopGroup?.ShutdownGracefullyAsync(TimeSpan.Zero, TimeSpan.Zero).Wait();
+            EventLoopGroup?.ShutdownGracefullyAsync(TimeSpan.Zero, TimeSpan.Zero);
             EventLoopGroup = null;
 
             base.Dispose();
@@ -227,8 +225,8 @@ namespace Nexum.Server
                     ch.Pipeline.AddLast(new NetServerAdapter(this));
                 }))
                 .ChildOption(ChannelOption.TcpNodelay, !NetConfig.EnableNagleAlgorithm)
-                .ChildOption(ChannelOption.SoRcvbuf, 51200)
-                .ChildOption(ChannelOption.SoSndbuf, 8192)
+                .ChildOption(ChannelOption.SoRcvbuf, NetConfig.TcpIssueRecvLength)
+                .ChildOption(ChannelOption.SoSndbuf, NetConfig.TcpSendBufferLength)
                 .ChildOption(ChannelOption.AllowHalfClosure, false)
                 .ChildAttribute(ChannelAttributes.Session, default(NetSession))
                 .BindAsync(endPoint);
@@ -319,50 +317,48 @@ namespace Nexum.Server
                     if (!stateFromTarget.RemotePeer.Session.UdpEnabled || !session.UdpEnabled)
                         continue;
 
-                    bool isInitialized;
+                    bool isInitialized = false;
                     bool shouldRetry = false;
-                    object lock1 = session.HostId < stateFromTarget.RemotePeer.Session.HostId
-                        ? stateToTarget.StateLock
-                        : stateFromTarget.StateLock;
-                    object lock2 = session.HostId < stateFromTarget.RemotePeer.Session.HostId
-                        ? stateFromTarget.StateLock
-                        : stateToTarget.StateLock;
 
-                    lock (lock1)
-                    lock (lock2)
-                    {
-                        isInitialized = stateToTarget.IsInitialized;
-                        if (isInitialized)
+                    HolepunchHelper.WithOrderedLocks(
+                        session.HostId,
+                        stateFromTarget.RemotePeer.Session.HostId,
+                        stateToTarget.StateLock,
+                        stateFromTarget.StateLock,
+                        () =>
                         {
-                            var diff = now - stateToTarget.LastHolepunch;
-                            int backoffSeconds = Math.Min(8 * (1 << (int)stateToTarget.RetryCount), 60);
-                            if (!stateToTarget.HolepunchSuccess &&
-                                diff >= TimeSpan.FromSeconds(backoffSeconds) &&
-                                stateToTarget.RetryCount < HolepunchConstants.MaxRetryAttempts)
+                            isInitialized = stateToTarget.IsInitialized;
+                            if (isInitialized)
                             {
-                                shouldRetry = true;
-                                stateToTarget.RetryCount++;
-                                stateFromTarget.RetryCount++;
+                                var diff = now - stateToTarget.LastHolepunch;
+                                int backoffSeconds = Math.Min(8 * (1 << (int)stateToTarget.RetryCount), 60);
+                                if (!stateToTarget.HolepunchSuccess &&
+                                    diff >= TimeSpan.FromSeconds(backoffSeconds) &&
+                                    stateToTarget.RetryCount < HolepunchConfig.MaxRetryAttempts)
+                                {
+                                    shouldRetry = true;
+                                    stateToTarget.RetryCount++;
+                                    stateFromTarget.RetryCount++;
 
-                                stateToTarget.JitTriggered = stateFromTarget.JitTriggered = false;
-                                stateToTarget.NewConnectionSent = stateFromTarget.NewConnectionSent = false;
-                                stateToTarget.EstablishSent = stateFromTarget.EstablishSent = false;
-                                stateToTarget.PeerUdpHolepunchSuccess =
-                                    stateFromTarget.PeerUdpHolepunchSuccess = false;
-                                stateToTarget.LastHolepunch = stateFromTarget.LastHolepunch = now;
+                                    stateToTarget.JitTriggered = stateFromTarget.JitTriggered = false;
+                                    stateToTarget.NewConnectionSent = stateFromTarget.NewConnectionSent = false;
+                                    stateToTarget.EstablishSent = stateFromTarget.EstablishSent = false;
+                                    stateToTarget.PeerUdpHolepunchSuccess =
+                                        stateFromTarget.PeerUdpHolepunchSuccess = false;
+                                    stateToTarget.LastHolepunch = stateFromTarget.LastHolepunch = now;
+                                }
                             }
-                        }
-                    }
+                        });
 
                     if (isInitialized && shouldRetry)
                     {
                         session.Logger.Debug(
                             "Trying to reconnect P2P to {TargetHostId} {retryCount}/{maxCount}",
-                            stateToTarget.RemotePeer.Session.HostId, stateToTarget.RetryCount, HolepunchConstants
+                            stateToTarget.RemotePeer.Session.HostId, stateToTarget.RetryCount, HolepunchConfig
                                 .MaxRetryAttempts);
                         stateFromTarget.RemotePeer.Session.Logger.Debug(
                             "Trying to reconnect P2P to {TargetHostId} {retryCount}/{maxCount}",
-                            session.HostId, stateFromTarget.RetryCount, HolepunchConstants.MaxRetryAttempts);
+                            session.HostId, stateFromTarget.RetryCount, HolepunchConfig.MaxRetryAttempts);
 
                         SendRenewP2PConnectionState(session, stateToTarget.RemotePeer.Session.HostId);
                         SendRenewP2PConnectionState(stateToTarget.RemotePeer.Session, session.HostId);
@@ -380,7 +376,7 @@ namespace Nexum.Server
             }
 
             server.ScheduleAsync(RetryUdpOrHolepunchIfRequired, server, null,
-                TimeSpan.FromMilliseconds(HolepunchConstants.RetryIntervalMs));
+                TimeSpan.FromMilliseconds(HolepunchConfig.RetryIntervalMs));
         }
 
         internal void InitiateUdpSetup(NetSession session)
@@ -399,18 +395,22 @@ namespace Nexum.Server
             SendUdpSocketRequest(session);
         }
 
-        private void SendUdpSocketRequest(NetSession session)
+        internal UdpSocket GetRandomUdpSocket()
         {
-            session.LastUdpSetupAttempt = DateTimeOffset.Now;
-
-            UdpSocket socket;
             lock (_udpSocketsCacheLock)
             {
                 if (_udpSocketsCache == null || _udpSocketsCache.Length != UdpSockets.Count)
                     _udpSocketsCache = UdpSockets.Values.ToArray();
-                int socketIndex = Random.Next(_udpSocketsCache.Length);
-                socket = _udpSocketsCache[socketIndex];
+                int socketIndex = Random.Shared.Next(_udpSocketsCache.Length);
+                return _udpSocketsCache[socketIndex];
             }
+        }
+
+        private void SendUdpSocketRequest(NetSession session)
+        {
+            session.LastUdpSetupAttempt = DateTimeOffset.Now;
+
+            var socket = GetRandomUdpSocket();
 
             session.UdpSocket = socket;
             session.HolepunchMagicNumber = Guid.NewGuid();
@@ -468,22 +468,23 @@ namespace Nexum.Server
         private static void InitializeP2PConnection(NetSession session, P2PConnectionState stateToTarget,
             P2PConnectionState stateFromTarget)
         {
-            object lock1 = session.HostId < stateFromTarget.RemotePeer.Session.HostId
-                ? stateToTarget.StateLock
-                : stateFromTarget.StateLock;
-            object lock2 = session.HostId < stateFromTarget.RemotePeer.Session.HostId
-                ? stateFromTarget.StateLock
-                : stateToTarget.StateLock;
+            bool shouldInitialize = HolepunchHelper.WithOrderedLocks(
+                session.HostId,
+                stateFromTarget.RemotePeer.Session.HostId,
+                stateToTarget.StateLock,
+                stateFromTarget.StateLock,
+                () =>
+                {
+                    if (stateToTarget.IsInitialized)
+                        return false;
 
-            lock (lock1)
-            lock (lock2)
-            {
-                if (stateToTarget.IsInitialized)
-                    return;
+                    stateToTarget.LastHolepunch = stateFromTarget.LastHolepunch = DateTimeOffset.Now;
+                    stateToTarget.IsInitialized = stateFromTarget.IsInitialized = true;
+                    return true;
+                });
 
-                stateToTarget.LastHolepunch = stateFromTarget.LastHolepunch = DateTimeOffset.Now;
-                stateToTarget.IsInitialized = stateFromTarget.IsInitialized = true;
-            }
+            if (!shouldInitialize)
+                return;
 
             SendP2PRecycleComplete(session, stateToTarget.RemotePeer.Session.HostId);
             SendP2PRecycleComplete(stateToTarget.RemotePeer.Session, session.HostId);

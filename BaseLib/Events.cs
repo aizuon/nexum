@@ -8,7 +8,7 @@ namespace BaseLib
     {
         private static readonly ILogger Logger = Log.ForContext("SourceContext", nameof(Events));
 
-        public static void OnUnobservedTaskException(object? sender, UnobservedTaskExceptionEventArgs e)
+        public static void OnUnobservedTaskException(object sender, UnobservedTaskExceptionEventArgs e)
         {
             e.SetObserved();
             Logger.Error("{Exception:l}", e.Exception.ToString());
@@ -22,7 +22,7 @@ namespace BaseLib
                 Logger.Error("{Exception:l}", args.ExceptionObject?.ToString() ?? "<null>");
         }
 
-        public static void OnCancelKeyPress(object? sender, ConsoleCancelEventArgs e)
+        public static void OnCancelKeyPress(object sender, ConsoleCancelEventArgs e)
         {
             Environment.Exit(0);
         }

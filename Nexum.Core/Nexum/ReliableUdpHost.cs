@@ -2,7 +2,7 @@ using System;
 
 namespace Nexum.Core
 {
-    internal class ReliableUdpHost
+    internal sealed class ReliableUdpHost
     {
         private readonly object _lock = new object();
 
@@ -129,7 +129,7 @@ namespace Nexum.Core
         }
     }
 
-    internal class ReliableUdpStats
+    internal sealed class ReliableUdpStats
     {
         public int ReceivedStreamCount { get; set; }
         public uint ExpectedFrameNumber { get; set; }

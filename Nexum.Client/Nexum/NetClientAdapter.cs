@@ -9,7 +9,7 @@ using Constants = Serilog.Core.Constants;
 
 namespace Nexum.Client
 {
-    internal class NetClientAdapter : ChannelHandlerAdapter
+    internal sealed class NetClientAdapter : ChannelHandlerAdapter
     {
         private readonly ILogger _logger;
         private readonly NetClient _owner;

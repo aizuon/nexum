@@ -10,7 +10,7 @@ using Constants = Serilog.Core.Constants;
 
 namespace Nexum.Server
 {
-    internal class SessionHandler : ChannelHandlerAdapter
+    internal sealed class SessionHandler : ChannelHandlerAdapter
     {
         public readonly ILogger Logger;
 

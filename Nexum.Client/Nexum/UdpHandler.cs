@@ -2,12 +2,15 @@ using System.Threading.Tasks;
 using DotNetty.Transport.Channels;
 using Nexum.Core;
 using Serilog;
+using Constants = Serilog.Core.Constants;
 
 namespace Nexum.Client
 {
-    internal class UdpHandler : ChannelHandlerAdapter
+    internal sealed class UdpHandler : ChannelHandlerAdapter
     {
-        private static readonly ILogger Logger = Log.ForContext<UdpHandler>();
+        private static readonly ILogger
+            Logger = Log.ForContext(Constants.SourceContextPropertyName, nameof(UdpHandler));
+
         private readonly NetClient _owner;
 
         public UdpHandler(NetClient owner)
@@ -93,7 +96,7 @@ namespace Nexum.Client
             var netMessage = new NetMessage(assembledPacket.Packet.AssembledData,
                 assembledPacket.Packet.AssembledData.Length);
 
-            NetClientHandler.ReadFrame(_owner, netMessage, message.EndPoint, true);
+            NetClientHandler.ReadFrame(_owner, netMessage, message.FilterTag, message.EndPoint, true);
 
             content.Release();
         }

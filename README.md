@@ -15,14 +15,17 @@ A high-performance networking library for .NET 10 designed for real-time multipl
 - **UDP via NAT Hole Punching** - Optional low-latency UDP channel established through automatic NAT traversal
   - **Unreliable UDP** - Fire-and-forget for real-time data (position updates, etc.)
   - **Reliable UDP** - Guaranteed delivery over UDP with automatic retransmission and ordering
-- **Auto Fragmentation** - Large UDP packets automatically fragmented and reassembled
+- **MTU Discovery** - Binary search algorithm discovers optimal MTU by piggybacking probes on ping/pong packets
+- **Auto Fragmentation** - Large UDP packets automatically fragmented and reassembled with adaptive MTU
 - **Message Compression** - Zlib compression for bandwidth optimization
+- **Server Time Sync** - Client can synchronize with server time
 
 ### Peer-to-Peer (P2P)
 
 - **P2P Groups** - Server orchestrates client-to-client UDP connections
 - **P2P NAT Hole Punching** - Direct peer-to-peer connections through NAT
 - **Direct P2P** - Send messages directly between peers over UDP
+- **P2P MTU Discovery** - Each peer pair discovers optimal MTU independently
 - **Relayed P2P** - Fallback relay through server when direct connection fails
   - **TCP Relay** - Relayed messages through server TCP
   - **UDP Relay** - Relayed messages through server UDP (supports both reliable and unreliable)
@@ -39,8 +42,9 @@ A high-performance networking library for .NET 10 designed for real-time multipl
 - **Asynchronous I/O** - Built on DotNetty for high-performance async networking
 - **UDP Socket Pool** - Multiple UDP listener sockets with random assignment for load distribution
 - **Efficient Serialization** - Custom binary serialization with `NetMessage`
-- **Zero-Allocation Patterns** - Uses `GC.AllocateUninitializedArray`, `ArrayPool`, and many more clever optimizations
+- **Zero-Allocation Patterns** - `GC.AllocateUninitializedArray`, `ArrayPool<T>`, `stackalloc` for small buffers, `Span<T>`, and `BinaryPrimitives`
 - **Optimized Thread Pools** - DotNetty `MultithreadEventLoopGroup` auto-scales to CPU core count
+- **Adaptive Fragmentation** - MTU inferred from incoming fragments for efficient reassembly
 
 ## 📦 Project Structure
 
@@ -86,6 +90,7 @@ Nexum/
 │   │   ├── FragmentConfig.cs
 │   │   ├── HolepunchHelper.cs
 │   │   ├── HostId.cs
+│   │   ├── MtuDiscovery.cs
 │   │   ├── NetConfig.cs
 │   │   ├── NetCore.cs
 │   │   ├── NetCoreHandler.cs
@@ -133,7 +138,9 @@ Nexum/
 │   ├── Integration/
 │   │   ├── ConnectionTests.cs
 │   │   ├── EdgeCaseTests.cs
+│   │   ├── IntegrationTestBase.cs
 │   │   ├── KeyExchangeTests.cs
+│   │   ├── MtuDiscoveryTests.cs
 │   │   ├── P2PConnectionTests.cs
 │   │   ├── ReliableUdpTests.cs
 │   │   ├── UdpConnectionTests.cs
@@ -176,7 +183,7 @@ using Nexum.Server;
 var server = new NetServer(ServerType.Relay);
 
 // Handle incoming RMI messages
-server.OnRMIRecieve += (session, message, rmiId) =>
+server.OnRMIReceive += (session, message, rmiId) =>
 {
     switch (rmiId)
     {
@@ -221,7 +228,7 @@ client.OnConnectionComplete += () =>
 };
 
 // Handle incoming RMI messages
-client.OnRMIRecieve += (message, rmiId) =>
+client.OnRMIReceive += (message, rmiId) =>
 {
     message.Read(out int result);
     Console.WriteLine($"Received response: {result}");
@@ -408,14 +415,13 @@ The following features are planned or partially implemented:
 
 ### Configurable Settings
 
-| Setting                                     | Type     | Default | Description                                                     |
-| ------------------------------------------- | -------- | ------- | --------------------------------------------------------------- |
-| `FragmentConfig.MtuLength`                  | `int`    | 500     | UDP packet MTU size (can be changed before server/client start) |
-| `NetSettings.EnableNagleAlgorithm`          | `bool`   | `true`  | TCP Nagle algorithm                                             |
-| `NetSettings.IdleTimeout`                   | `double` | 900     | Session idle timeout in seconds                                 |
-| `NetSettings.MessageMaxLength`              | `uint`   | 1048576 | Maximum message size                                            |
-| `NetSettings.EncryptedMessageKeyLength`     | `uint`   | 256     | AES key length in bits                                          |
-| `NetSettings.FastEncryptedMessageKeyLength` | `uint`   | 512     | RC4 key length in bits                                          |
+| Setting                                     | Type     | Default | Description                     |
+| ------------------------------------------- | -------- | ------- | ------------------------------- |
+| `NetSettings.EnableNagleAlgorithm`          | `bool`   | `true`  | TCP Nagle algorithm             |
+| `NetSettings.IdleTimeout`                   | `double` | 900     | Session idle timeout in seconds |
+| `NetSettings.MessageMaxLength`              | `uint`   | 1048576 | Maximum message size            |
+| `NetSettings.EncryptedMessageKeyLength`     | `uint`   | 256     | AES key length in bits          |
+| `NetSettings.FastEncryptedMessageKeyLength` | `uint`   | 512     | RC4 key length in bits          |
 
 ## 🤝 Contributing
 

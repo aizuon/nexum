@@ -4,9 +4,9 @@
         <OutputType>Exe</OutputType>
     </PropertyGroup>
     <ItemGroup>
-        <ProjectReference Include="..\BaseLib\BaseLib.csproj" />
-        <ProjectReference Include="..\Nexum.Core\Nexum.Core.csproj" />
-        <ProjectReference Include="..\Nexum.Server\Nexum.Server.csproj" />
+        <ProjectReference Include="..\BaseLib\BaseLib.csproj"/>
+        <ProjectReference Include="..\Nexum.Core\Nexum.Core.csproj"/>
+        <ProjectReference Include="..\Nexum.Server\Nexum.Server.csproj"/>
     </ItemGroup>
     <ItemGroup>
         <PackageReference Include="Serilog">

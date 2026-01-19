@@ -1,4 +1,5 @@
 using System;
+using System.Buffers.Binary;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
@@ -59,14 +60,14 @@ namespace BaseLib
         {
             using var val = new T();
             byte[] value = val.ComputeHash(inputStream);
-            return BitConverter.ToUInt16(value, 0);
+            return BinaryPrimitives.ReadUInt16LittleEndian(value);
         }
 
         public static ushort GetUInt16<T>(byte[] data, int offset, int count) where T : HashAlgorithm, new()
         {
             using var val = new T();
             byte[] value = val.ComputeHash(data, offset, count);
-            return BitConverter.ToUInt16(value, 0);
+            return BinaryPrimitives.ReadUInt16LittleEndian(value);
         }
 
         public static ushort GetUInt16<T>(byte[] data) where T : HashAlgorithm, new()
@@ -84,14 +85,14 @@ namespace BaseLib
         {
             using var val = new T();
             byte[] value = val.ComputeHash(inputStream);
-            return BitConverter.ToUInt32(value, 0);
+            return BinaryPrimitives.ReadUInt32LittleEndian(value);
         }
 
         public static uint GetUInt32<T>(byte[] data, int offset, int count) where T : HashAlgorithm, new()
         {
             using var val = new T();
             byte[] value = val.ComputeHash(data, offset, count);
-            return BitConverter.ToUInt32(value, 0);
+            return BinaryPrimitives.ReadUInt32LittleEndian(value);
         }
 
         public static uint GetUInt32<T>(byte[] data) where T : HashAlgorithm, new()
@@ -109,14 +110,14 @@ namespace BaseLib
         {
             using var val = new T();
             byte[] value = val.ComputeHash(inputStream);
-            return BitConverter.ToUInt64(value, 0);
+            return BinaryPrimitives.ReadUInt64LittleEndian(value);
         }
 
         public static ulong GetUInt64<T>(byte[] data, int offset, int count) where T : HashAlgorithm, new()
         {
             using var val = new T();
             byte[] value = val.ComputeHash(data, offset, count);
-            return BitConverter.ToUInt64(value, 0);
+            return BinaryPrimitives.ReadUInt64LittleEndian(value);
         }
 
         public static ulong GetUInt64<T>(byte[] data) where T : HashAlgorithm, new()

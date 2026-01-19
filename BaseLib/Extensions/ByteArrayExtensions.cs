@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.IO.Compression;
+using System.Runtime.CompilerServices;
 
 namespace BaseLib.Extensions
 {
@@ -73,6 +74,7 @@ namespace BaseLib.Extensions
             return deflateStream.ReadToEnd();
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static byte[] FastClone(this byte[] buffer)
         {
             byte[] array = GC.AllocateUninitializedArray<byte>(buffer.Length);
@@ -80,11 +82,13 @@ namespace BaseLib.Extensions
             return array;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static void FastCopyTo(this byte[] source, byte[] destination, int destinationOffset)
         {
             Buffer.BlockCopy(source, 0, destination, destinationOffset, source.Length);
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static void FastCopyTo(this byte[] source, int sourceOffset, byte[] destination, int destinationOffset,
             int count)
         {

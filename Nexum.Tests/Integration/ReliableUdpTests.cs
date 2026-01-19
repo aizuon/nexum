@@ -1,9 +1,10 @@
-using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Nexum.Core;
+using Nexum.Core.Simulation;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -16,152 +17,41 @@ namespace Nexum.Tests.Integration
         {
         }
 
-        [Fact(Timeout = 60000)]
-        public async Task ReliableUdp_ClientToServer_MessageDelivered()
-        {
-            Server = await CreateServerAsync(withUdp: true);
-            var client = await CreateClientAsync();
-            await WaitForClientConnectionAsync(client);
-
-            var session = Server.Sessions.Values.First();
-            var p2pGroup = Server.CreateP2PGroup();
-
-            p2pGroup.Join(session);
-
-            bool clientUdpEnabled = await WaitForClientUdpEnabledAsync(client);
-            bool sessionUdpEnabled = await WaitForSessionUdpEnabledAsync(session);
-            Assert.True(clientUdpEnabled, "Client UDP should be enabled after holepunch");
-            Assert.True(sessionUdpEnabled, "Session UDP should be enabled after holepunch");
-
-            await WaitForConditionAsync(
-                () => client.ToServerReliableUdp != null && session.ToClientReliableUdp != null,
-                ConnectionTimeout);
-
-            Assert.NotNull(client.ToServerReliableUdp);
-            Assert.NotNull(session.ToClientReliableUdp);
-
-            int receivedValue = 0;
-            var messageReceived = new ManualResetEventSlim(false);
-
-            Server.OnRMIRecieve += (_, msg, _) =>
+        public static IEnumerable<object[]> NetworkProfiles =>
+            new List<object[]>
             {
-                msg.Read(out receivedValue);
-                messageReceived.Set();
+                new object[] { "Ideal" },
+                new object[] { "HomeWifi" },
+                new object[] { "Mobile4G" },
+                new object[] { "PoorMobile" }
             };
 
-            var testMessage = new NetMessage();
-            testMessage.Write(42424);
-            client.RmiToServerUdpIfAvailable(7001, testMessage, reliable: true);
-
-            await Task.Delay(200);
-
-            Assert.True(messageReceived.Wait(MessageTimeout), "Server should receive reliable UDP message");
-            Assert.Equal(42424, receivedValue);
-        }
-
-        [Fact(Timeout = 60000)]
-        public async Task ReliableUdp_ServerToClient_MessageDelivered()
+        [Theory(Timeout = 180000)]
+        [MemberData(nameof(NetworkProfiles))]
+        public async Task ReliableUdp_ClientServer_MessagesDeliveredInOrder(string profileName)
         {
+            var profile = NetworkProfile.GetByName(profileName);
+            SetupNetworkSimulation(profile);
+
             Server = await CreateServerAsync(withUdp: true);
             var client = await CreateClientAsync();
             await WaitForClientConnectionAsync(client);
 
             var session = Server.Sessions.Values.First();
-            var p2pGroup = Server.CreateP2PGroup();
+            var group = Server.CreateP2PGroup();
+            group.Join(session);
 
-            p2pGroup.Join(session);
-
-            await WaitForClientUdpEnabledAsync(client);
-            await WaitForSessionUdpEnabledAsync(session);
+            await WaitForClientUdpEnabledAsync(client, GetAdjustedTimeout(UdpSetupTimeout));
+            await WaitForSessionUdpEnabledAsync(session, GetAdjustedTimeout(UdpSetupTimeout));
             await WaitForConditionAsync(
                 () => client.ToServerReliableUdp != null && session.ToClientReliableUdp != null,
-                ConnectionTimeout);
-
-            int receivedValue = 0;
-            var messageReceived = new ManualResetEventSlim(false);
-
-            client.OnRMIRecieve += (msg, _) =>
-            {
-                msg.Read(out receivedValue);
-                messageReceived.Set();
-            };
-
-            var testMessage = new NetMessage();
-            testMessage.Write(98765);
-            session.RmiToClientUdpIfAvailable(7002, testMessage, reliable: true);
-
-            await Task.Delay(200);
-
-            Assert.True(messageReceived.Wait(MessageTimeout), "Client should receive reliable UDP message");
-            Assert.Equal(98765, receivedValue);
-        }
-
-        [Fact(Timeout = 60000)]
-        public async Task ReliableUdp_LargePayload_TransmittedSuccessfully()
-        {
-            Server = await CreateServerAsync(withUdp: true);
-            var client = await CreateClientAsync();
-            await WaitForClientConnectionAsync(client);
-
-            var session = Server.Sessions.Values.First();
-            var p2pGroup = Server.CreateP2PGroup();
-
-            p2pGroup.Join(session);
-
-            await WaitForClientUdpEnabledAsync(client);
-            await WaitForSessionUdpEnabledAsync(session);
-            await WaitForConditionAsync(
-                () => client.ToServerReliableUdp != null && session.ToClientReliableUdp != null,
-                ConnectionTimeout);
-
-            byte[] receivedData = null;
-            var messageReceived = new ManualResetEventSlim(false);
-
-            Server.OnRMIRecieve += (_, msg, _) =>
-            {
-                var byteArray = new ByteArray();
-                msg.Read(ref byteArray);
-                receivedData = byteArray.GetBuffer();
-                messageReceived.Set();
-            };
-
-            byte[] largeData = new byte[5000];
-            new Random(42).NextBytes(largeData);
-
-            var testMessage = new NetMessage();
-            testMessage.Write(new ByteArray(largeData));
-            client.RmiToServerUdpIfAvailable(7003, testMessage, reliable: true);
-
-            Assert.True(messageReceived.Wait(MessageTimeout),
-                "Server should receive large reliable UDP message");
-            Assert.NotNull(receivedData);
-            Assert.Equal(largeData.Length, receivedData.Length);
-            Assert.Equal(largeData, receivedData);
-        }
-
-        [Fact(Timeout = 60000)]
-        public async Task ReliableUdp_MultipleMessages_AllDeliveredInOrder()
-        {
-            Server = await CreateServerAsync(withUdp: true);
-            var client = await CreateClientAsync();
-            await WaitForClientConnectionAsync(client);
-
-            var session = Server.Sessions.Values.First();
-            var p2pGroup = Server.CreateP2PGroup();
-
-            p2pGroup.Join(session);
-
-            await WaitForClientUdpEnabledAsync(client);
-            await WaitForSessionUdpEnabledAsync(session);
-            await WaitForConditionAsync(
-                () => client.ToServerReliableUdp != null && session.ToClientReliableUdp != null,
-                ConnectionTimeout);
+                GetAdjustedTimeout(ConnectionTimeout));
 
             var receivedValues = new ConcurrentQueue<int>();
-            int messageCount = 5;
+            const int messageCount = 5;
             var allReceived = new CountdownEvent(messageCount);
 
-            Server.OnRMIRecieve += (_, msg, _) =>
+            Server.OnRMIReceive += (_, msg, _) =>
             {
                 msg.Read(out int value);
                 receivedValues.Enqueue(value);
@@ -172,49 +62,53 @@ namespace Nexum.Tests.Integration
             {
                 var testMessage = new NetMessage();
                 testMessage.Write(i * 100);
-                client.RmiToServerUdpIfAvailable(7004, testMessage, reliable: true);
+                client.RmiToServerUdpIfAvailable(7001, testMessage, reliable: true);
             }
 
-            Assert.True(allReceived.Wait(MessageTimeout),
-                $"All {messageCount} messages should be received, got {messageCount - allReceived.CurrentCount}");
+            Assert.True(allReceived.Wait(GetAdjustedTimeout(MessageTimeout)),
+                $"[{profileName}] All messages should be received, got {messageCount - allReceived.CurrentCount}");
 
             int[] receivedArray = receivedValues.ToArray();
             Assert.Equal(messageCount, receivedArray.Length);
-
             for (int i = 0; i < messageCount; i++)
                 Assert.Equal(i * 100, receivedArray[i]);
+
+            LogSimulationStatistics();
         }
 
-        [Fact(Timeout = 60000)]
-        public async Task ReliableUdp_BidirectionalCommunication_BothDirectionsWork()
+        [Theory(Timeout = 180000)]
+        [MemberData(nameof(NetworkProfiles))]
+        public async Task ReliableUdp_ClientServer_Bidirectional(string profileName)
         {
+            var profile = NetworkProfile.GetByName(profileName);
+            SetupNetworkSimulation(profile);
+
             Server = await CreateServerAsync(withUdp: true);
             var client = await CreateClientAsync();
             await WaitForClientConnectionAsync(client);
 
             var session = Server.Sessions.Values.First();
-            var p2pGroup = Server.CreateP2PGroup();
+            var group = Server.CreateP2PGroup();
+            group.Join(session);
 
-            p2pGroup.Join(session);
-
-            await WaitForClientUdpEnabledAsync(client);
-            await WaitForSessionUdpEnabledAsync(session);
+            await WaitForClientUdpEnabledAsync(client, GetAdjustedTimeout(UdpSetupTimeout));
+            await WaitForSessionUdpEnabledAsync(session, GetAdjustedTimeout(UdpSetupTimeout));
             await WaitForConditionAsync(
                 () => client.ToServerReliableUdp != null && session.ToClientReliableUdp != null,
-                ConnectionTimeout);
+                GetAdjustedTimeout(ConnectionTimeout));
 
             int clientToServerValue = 0;
             int serverToClientValue = 0;
             var clientToServerReceived = new ManualResetEventSlim(false);
             var serverToClientReceived = new ManualResetEventSlim(false);
 
-            Server.OnRMIRecieve += (_, msg, _) =>
+            Server.OnRMIReceive += (_, msg, _) =>
             {
                 msg.Read(out clientToServerValue);
                 clientToServerReceived.Set();
             };
 
-            client.OnRMIRecieve += (msg, _) =>
+            client.OnRMIReceive += (msg, _) =>
             {
                 msg.Read(out serverToClientValue);
                 serverToClientReceived.Set();
@@ -222,19 +116,130 @@ namespace Nexum.Tests.Integration
 
             var clientMsg = new NetMessage();
             clientMsg.Write(11111);
-            client.RmiToServerUdpIfAvailable(7005, clientMsg, reliable: true);
+            client.RmiToServerUdpIfAvailable(7002, clientMsg, reliable: true);
 
             var serverMsg = new NetMessage();
             serverMsg.Write(22222);
-            session.RmiToClientUdpIfAvailable(7006, serverMsg, reliable: true);
+            session.RmiToClientUdpIfAvailable(7003, serverMsg, reliable: true);
 
-            Assert.True(clientToServerReceived.Wait(MessageTimeout),
-                "Server should receive reliable UDP message from client");
-            Assert.True(serverToClientReceived.Wait(MessageTimeout),
-                "Client should receive reliable UDP message from server");
-
+            Assert.True(clientToServerReceived.Wait(GetAdjustedTimeout(MessageTimeout)));
+            Assert.True(serverToClientReceived.Wait(GetAdjustedTimeout(MessageTimeout)));
             Assert.Equal(11111, clientToServerValue);
             Assert.Equal(22222, serverToClientValue);
+
+            LogSimulationStatistics();
+        }
+
+        [Theory(Timeout = 180000)]
+        [MemberData(nameof(NetworkProfiles))]
+        public async Task ReliableUdp_P2PDirect_MessagesDelivered(string profileName)
+        {
+            var profile = NetworkProfile.GetByName(profileName);
+            SetupNetworkSimulation(profile);
+
+            Server = await CreateServerAsync();
+
+            var client1 = await CreateClientAsync();
+            await WaitForClientConnectionAsync(client1);
+
+            var client2 = await CreateClientAsync();
+            await WaitForClientConnectionAsync(client2);
+
+            var session1 = Server.Sessions[client1.HostId];
+            var session2 = Server.Sessions[client2.HostId];
+            var group = Server.CreateP2PGroup();
+
+            group.Join(session1);
+            group.Join(session2);
+            await WaitForClientUdpEnabledAsync(client1, GetAdjustedTimeout(UdpSetupTimeout));
+            await WaitForClientUdpEnabledAsync(client2, GetAdjustedTimeout(UdpSetupTimeout));
+
+            await WaitForConditionAsync(
+                () => client1.P2PGroup?.P2PMembers.ContainsKey(client2.HostId) == true &&
+                      client2.P2PGroup?.P2PMembers.ContainsKey(client1.HostId) == true,
+                GetAdjustedTimeout(MessageTimeout));
+
+            var peer1 = client1.P2PGroup.P2PMembers[client2.HostId];
+            var peer2 = client2.P2PGroup.P2PMembers[client1.HostId];
+
+            await WaitForP2PDirectConnectionAsync(peer1, GetAdjustedTimeout(UdpSetupTimeout));
+            await WaitForP2PDirectConnectionAsync(peer2, GetAdjustedTimeout(UdpSetupTimeout));
+
+            int messageCount = 0;
+            const int expectedCount = 5;
+            var allReceived = new ManualResetEventSlim(false);
+
+            client2.OnRMIReceive += (_, _) =>
+            {
+                if (Interlocked.Increment(ref messageCount) >= expectedCount)
+                    allReceived.Set();
+            };
+
+            await Task.Delay(100);
+
+            for (int i = 0; i < expectedCount; i++)
+            {
+                var msg = new NetMessage();
+                msg.Write(2000 + i);
+                peer1.RmiToPeer(7004, msg, false, true);
+                await Task.Delay(200);
+            }
+
+            Assert.True(allReceived.Wait(GetAdjustedTimeout(LongOperationTimeout)),
+                $"[{profileName}] All reliable P2P messages should be delivered (received {messageCount})");
+
+            LogSimulationStatistics();
+        }
+
+        [Theory(Timeout = 180000)]
+        [MemberData(nameof(NetworkProfiles))]
+        public async Task ReliableUdp_P2PRelayed_MessagesDelivered(string profileName)
+        {
+            var profile = NetworkProfile.GetByName(profileName);
+            SetupNetworkSimulation(profile);
+
+            Server = await CreateServerAsync();
+
+            var client1 = await CreateClientAsync();
+            await WaitForClientConnectionAsync(client1);
+
+            var client2 = await CreateClientAsync();
+            await WaitForClientConnectionAsync(client2);
+
+            var session1 = Server.Sessions[client1.HostId];
+            var session2 = Server.Sessions[client2.HostId];
+            var group = Server.CreateP2PGroup();
+
+            group.Join(session1);
+            group.Join(session2);
+            await WaitForClientUdpEnabledAsync(client1, GetAdjustedTimeout(UdpSetupTimeout));
+            await WaitForClientUdpEnabledAsync(client2, GetAdjustedTimeout(UdpSetupTimeout));
+
+            await WaitForConditionAsync(
+                () => client1.P2PGroup?.P2PMembers.ContainsKey(client2.HostId) == true &&
+                      client2.P2PGroup?.P2PMembers.ContainsKey(client1.HostId) == true,
+                GetAdjustedTimeout(MessageTimeout));
+
+            var peer1 = client1.P2PGroup.P2PMembers[client2.HostId];
+
+            int receivedValue = 0;
+            var messageReceived = new ManualResetEventSlim(false);
+
+            client2.OnRMIReceive += (msg, _) =>
+            {
+                msg.Read(out receivedValue);
+                messageReceived.Set();
+            };
+
+            var testMessage = new NetMessage();
+            testMessage.Write(55555);
+            peer1.RmiToPeer(7005, testMessage, true, true);
+
+            Assert.True(messageReceived.Wait(GetAdjustedTimeout(MessageTimeout)),
+                $"[{profileName}] Relayed reliable message should be delivered");
+            Assert.Equal(55555, receivedValue);
+
+            LogSimulationStatistics();
         }
     }
 }

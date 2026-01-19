@@ -54,7 +54,7 @@ namespace BaseLib.Extensions
                     totalRead += read;
                 }
 
-                return result.AsSpan(0, totalRead).ToArray();
+                return totalRead == remaining ? result : result.AsSpan(0, totalRead).ToArray();
             }
 
             using var memoryStream = new MemoryStream();
@@ -97,7 +97,7 @@ namespace BaseLib.Extensions
                     totalRead += read;
                 }
 
-                return result.AsSpan(0, totalRead).ToArray();
+                return totalRead == remaining ? result : result.AsSpan(0, totalRead).ToArray();
             }
 
             using var memoryStream = new MemoryStream();

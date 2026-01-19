@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Net;
 using System.Threading;
@@ -6,6 +7,7 @@ using System.Threading.Tasks;
 using BaseLib;
 using Nexum.Client;
 using Nexum.Core;
+using Nexum.Core.Simulation;
 using Nexum.Server;
 using Serilog;
 using Xunit;
@@ -20,16 +22,18 @@ namespace Nexum.Tests.Integration
         protected static readonly uint[] DefaultUdpPorts = { 39000, 39001, 39002, 39003 };
         protected static readonly IPAddress DefaultAddress = IPAddress.Loopback;
 
-        // Normalized timeout constants for integration tests
         protected static readonly TimeSpan ConnectionTimeout = TimeSpan.FromSeconds(5);
         protected static readonly TimeSpan MessageTimeout = TimeSpan.FromSeconds(10);
         protected static readonly TimeSpan UdpSetupTimeout = TimeSpan.FromSeconds(15);
         protected static readonly TimeSpan LongOperationTimeout = TimeSpan.FromSeconds(30);
 
         private static int _portOffset;
+
+        private readonly ConcurrentBag<Exception> _unobservedExceptions = new ConcurrentBag<Exception>();
         protected readonly List<NetClient> CreatedClients = new List<NetClient>();
 
         protected readonly ITestOutputHelper Output;
+        private EventHandler<UnobservedTaskExceptionEventArgs> _unobservedHandler;
         protected NetServer Server;
         protected int TcpPort;
         protected uint[] UdpPorts;
@@ -55,7 +59,17 @@ namespace Nexum.Tests.Integration
                 (uint)(DefaultUdpPorts[2] + offset * 10),
                 (uint)(DefaultUdpPorts[3] + offset * 10)
             ];
+
+            _unobservedHandler = (sender, e) =>
+            {
+                e.SetObserved();
+                _unobservedExceptions.Add(e.Exception);
+                Output.WriteLine($"[UNOBSERVED TASK EXCEPTION] {e.Exception}");
+            };
+            TaskScheduler.UnobservedTaskException += _unobservedHandler;
         }
+
+        protected NetworkProfile CurrentNetworkProfile { get; set; }
 
         public virtual Task InitializeAsync()
         {
@@ -64,7 +78,26 @@ namespace Nexum.Tests.Integration
 
         public virtual async Task DisposeAsync()
         {
+            ClearNetworkSimulation();
+
             var exceptions = new List<Exception>();
+
+            if (_unobservedHandler != null)
+            {
+                TaskScheduler.UnobservedTaskException -= _unobservedHandler;
+                _unobservedHandler = null;
+            }
+
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+
+            if (!_unobservedExceptions.IsEmpty)
+                foreach (var ex in _unobservedExceptions)
+                {
+                    Output.WriteLine($"[UNOBSERVED EXCEPTION DETECTED] {ex}");
+                    exceptions.Add(ex);
+                }
 
             foreach (var client in CreatedClients)
                 try
@@ -107,7 +140,14 @@ namespace Nexum.Tests.Integration
             await Task.Delay(100);
 
             if (exceptions.Count > 0)
+            {
                 Output.WriteLine($"Cleanup completed with {exceptions.Count} error(s)");
+                if (!_unobservedExceptions.IsEmpty)
+                    throw new AggregateException(
+                        "Test completed but unobserved task exceptions were detected. " +
+                        "This typically indicates fire-and-forget tasks with unhandled errors.",
+                        _unobservedExceptions);
+            }
         }
 
         private async Task DisposeClientAsync(NetClient client)
@@ -180,6 +220,10 @@ namespace Nexum.Tests.Integration
         {
             var endpoint = new IPEndPoint(DefaultAddress, TcpPort);
             var client = new NetClient(serverType);
+
+            if (CurrentNetworkProfile != null)
+                client.NetworkSimulationProfile = CurrentNetworkProfile;
+
             await client.ConnectAsync(endpoint);
             CreatedClients.Add(client);
             return client;
@@ -222,7 +266,67 @@ namespace Nexum.Tests.Integration
 
         protected async Task<bool> WaitForP2PDirectConnectionAsync(ClientP2PMember member, TimeSpan? timeout = null)
         {
-            return await WaitForConditionAsync(() => member.DirectP2P, timeout ?? UdpSetupTimeout);
+            return await WaitForConditionAsync(() => member.DirectP2PReady, timeout ?? UdpSetupTimeout);
         }
+
+        #region Network Simulation
+
+        protected void SetupNetworkSimulation(NetworkProfile profile)
+        {
+            CurrentNetworkProfile = profile;
+
+            if (profile == null || profile.IsIdeal)
+            {
+                ClearNetworkSimulation();
+                return;
+            }
+
+            Output.WriteLine($"[NETWORK SIM] Setting up simulation: {profile.Name}");
+            Output.WriteLine($"  - Latency: {profile.LatencyMs}ms ± {profile.JitterMs}ms jitter");
+            Output.WriteLine($"  - Packet Loss: {profile.PacketLossRate:P1}");
+            if (profile.PacketReorderRate > 0)
+                Output.WriteLine($"  - Reorder Rate: {profile.PacketReorderRate:P1}");
+            if (profile.NatType != NatType.None)
+                Output.WriteLine($"  - NAT Type: {profile.NatType}");
+        }
+
+        protected void ClearNetworkSimulation()
+        {
+            CurrentNetworkProfile = null;
+            NetworkSimulationStats.Clear();
+        }
+
+        protected void LogSimulationStatistics()
+        {
+            if (CurrentNetworkProfile == null || CurrentNetworkProfile.IsIdeal)
+                return;
+
+            var stats = NetworkSimulationStats.GetStatistics();
+            Output.WriteLine($"[NETWORK SIM] Statistics for {CurrentNetworkProfile.Name}:");
+            Output.WriteLine($"  - Packets Received: {stats.TotalReceived}");
+            Output.WriteLine($"  - Packets Sent: {stats.TotalSent}");
+            Output.WriteLine($"  - Packets Dropped: {stats.TotalDropped}");
+            Output.WriteLine($"  - Packets Delayed: {stats.TotalDelayed}");
+            Output.WriteLine($"  - Actual Drop Rate: {stats.DropRate:P2}");
+        }
+
+        protected TimeSpan GetAdjustedTimeout(TimeSpan baseTimeout)
+        {
+            if (CurrentNetworkProfile == null)
+                return baseTimeout;
+
+            double multiplier = 1.0;
+
+            if (CurrentNetworkProfile.LatencyMs > 100)
+                multiplier += 1.0;
+            if (CurrentNetworkProfile.PacketLossRate > 0.1)
+                multiplier += 1.0;
+            if (CurrentNetworkProfile.PacketLossRate > 0.2)
+                multiplier += 1.0;
+
+            return TimeSpan.FromTicks((long)(baseTimeout.Ticks * multiplier));
+        }
+
+        #endregion
     }
 }

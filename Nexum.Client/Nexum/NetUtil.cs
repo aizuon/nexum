@@ -1,8 +1,11 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using System.Text.RegularExpressions;
 
 namespace Nexum.Client
 {
@@ -10,6 +13,8 @@ namespace Nexum.Client
     {
         private static readonly object PortLock = new object();
         private static readonly HashSet<int> _reservedPorts = new HashSet<int>();
+        private static readonly List<(int Start, int End)> _windowsExcludedRanges = new List<(int, int)>();
+        private static bool _excludedRangesInitialized;
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal static bool IsUnicastEndpoint(IPEndPoint addrPort)
@@ -85,6 +90,8 @@ namespace Nexum.Client
                 if (startingPort > IPEndPoint.MaxPort)
                     throw new ArgumentOutOfRangeException(nameof(startingPort));
 
+                InitializeExcludedPortRanges();
+
                 var ipProps = IPGlobalProperties.GetIPGlobalProperties();
                 var used = new HashSet<int>();
 
@@ -96,9 +103,13 @@ namespace Nexum.Client
 
                 foreach (var l in ipProps.GetActiveUdpListeners())
                     used.Add(l.Port);
+
                 for (int port = startingPort; port <= IPEndPoint.MaxPort; port++)
                 {
                     if (used.Contains(port))
+                        continue;
+
+                    if (IsPortInExcludedRange(port))
                         continue;
 
                     if (!_reservedPorts.Add(port))
@@ -109,6 +120,54 @@ namespace Nexum.Client
 
                 throw new InvalidOperationException("No available ports.");
             }
+        }
+
+        private static void InitializeExcludedPortRanges()
+        {
+            if (_excludedRangesInitialized)
+                return;
+
+            _excludedRangesInitialized = true;
+
+            if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+                return;
+
+            try
+            {
+                var startInfo = new ProcessStartInfo
+                {
+                    FileName = "netsh",
+                    Arguments = "int ipv4 show excludedportrange protocol=udp",
+                    RedirectStandardOutput = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+
+                using var process = Process.Start(startInfo);
+                if (process == null)
+                    return;
+
+                string output = process.StandardOutput.ReadToEnd();
+                process.WaitForExit(5000);
+
+                var regex = new Regex(@"^\s*(\d+)\s+(\d+)", RegexOptions.Multiline);
+                foreach (Match match in regex.Matches(output))
+                    if (int.TryParse(match.Groups[1].Value, out int start) &&
+                        int.TryParse(match.Groups[2].Value, out int end))
+                        _windowsExcludedRanges.Add((start, end));
+            }
+            catch
+            {
+            }
+        }
+
+        private static bool IsPortInExcludedRange(int port)
+        {
+            foreach ((int start, int end) in _windowsExcludedRanges)
+                if (port >= start && port <= end)
+                    return true;
+
+            return false;
         }
 
 

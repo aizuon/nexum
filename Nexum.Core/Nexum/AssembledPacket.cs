@@ -2,7 +2,7 @@ using System.Net;
 
 namespace Nexum.Core
 {
-    internal class AssembledPacket
+    internal sealed class AssembledPacket
     {
         public DefraggingPacket Packet { get; set; }
 

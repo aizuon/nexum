@@ -3,7 +3,7 @@ using System.Runtime.CompilerServices;
 
 namespace Nexum.Core
 {
-    internal class StreamQueue
+    internal sealed class StreamQueue
     {
         private readonly object _lock = new object();
         private byte[] _buffer;

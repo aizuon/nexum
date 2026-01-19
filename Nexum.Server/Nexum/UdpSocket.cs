@@ -6,12 +6,13 @@ using DotNetty.Transport.Channels.Sockets;
 using Nexum.Core;
 using NexumCore.DotNetty.Codecs;
 using Serilog;
+using Constants = Serilog.Core.Constants;
 
 namespace Nexum.Server
 {
-    internal class UdpSocket
+    internal sealed class UdpSocket
     {
-        private static readonly ILogger Logger = Log.ForContext<UdpSocket>();
+        private static readonly ILogger Logger = Log.ForContext(Constants.SourceContextPropertyName, nameof(UdpSocket));
 
         public readonly uint Port;
         internal IEventLoopGroup WorkerGroup;
@@ -23,6 +24,8 @@ namespace Nexum.Server
             Logger.Information("UDP socket bound on {Address}:{Port}", udpAddress, listenerPort);
         }
 
+        public static Action<IChannelPipeline> UdpPipelineConfigurator { get; set; }
+
         public IChannel Channel { get; private set; }
 
         private IChannel Listen(NetServer owner, IPAddress udpAddress, uint listenerPort)
@@ -33,6 +36,8 @@ namespace Nexum.Server
                 .Channel<SocketDatagramChannel>()
                 .Handler(new ActionChannelInitializer<IChannel>(ch =>
                 {
+                    UdpPipelineConfigurator?.Invoke(ch.Pipeline);
+
                     ch.Pipeline
                         .AddLast(new UdpFrameDecoder(NetConfig.MessageMaxLength))
                         .AddLast(new UdpFrameEncoder())
@@ -46,9 +51,9 @@ namespace Nexum.Server
         public void Close()
         {
             Logger.Information("Closing UDP socket on port {Port}", Port);
-            Channel?.CloseAsync().Wait();
+            Channel?.CloseAsync();
             Channel = null;
-            WorkerGroup?.ShutdownGracefullyAsync(TimeSpan.Zero, TimeSpan.Zero).Wait();
+            WorkerGroup?.ShutdownGracefullyAsync(TimeSpan.Zero, TimeSpan.Zero);
             WorkerGroup = null;
         }
     }

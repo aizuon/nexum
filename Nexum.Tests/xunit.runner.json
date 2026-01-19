@@ -9,5 +9,5 @@
   "maxParallelThreads": 1,
   "preEnumerateTheories": true,
   "stopOnFail": false,
-  "longRunningTestSeconds": 20
+  "longRunningTestSeconds": 15
 }

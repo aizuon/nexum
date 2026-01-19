@@ -75,7 +75,9 @@ namespace BaseLib
         protected override byte[] HashFinal()
         {
             _checksum = ~_checksum;
-            return BitConverter.GetBytes(_checksum);
+            byte[] result = new byte[sizeof(uint)];
+            BinaryPrimitives.WriteUInt32LittleEndian(result, _checksum);
+            return result;
         }
 
         protected override bool TryHashFinal(Span<byte> destination, out int bytesWritten)
