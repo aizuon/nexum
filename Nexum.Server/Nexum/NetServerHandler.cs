@@ -224,6 +224,10 @@ namespace Nexum.Server
 
             if (clientRecentPing > 0)
             {
+                if (session.ClientUdpLastPing > 0)
+                    session.ClientUdpJitter = NetUtil.CalculateJitter(session.ClientUdpJitter, clientRecentPing,
+                        session.ClientUdpLastPing);
+
                 session.ClientUdpLastPing = clientRecentPing;
                 session.ClientUdpRecentPing = session.ClientUdpRecentPing != 0.0
                     ? SysUtil.Lerp(session.ClientUdpRecentPing, clientRecentPing,

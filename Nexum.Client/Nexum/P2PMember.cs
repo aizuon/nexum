@@ -16,11 +16,16 @@ namespace Nexum.Client
         internal readonly UdpPacketFragBoard UdpFragBoard = new UdpPacketFragBoard();
 
         private double _nextPingTime;
+        private double _nextTimeSyncTime;
         internal bool EnableDirectP2P = true;
-        internal bool IsClosed;
 
-        internal double LastPing;
+        internal double IndirectServerTimeDiff;
+        internal bool IsClosed;
+        internal double JitterInternal;
+        internal double LastPeerServerPing;
+        internal double LastPingInternal;
         internal double LastUdpReceivedTime;
+
         internal bool LocalPortReuseSuccess;
         internal bool P2PHolepunchInitiated;
         internal bool P2PHolepunchNotified;
@@ -28,9 +33,12 @@ namespace Nexum.Client
 
         internal object P2PMutex = new object();
         internal int PeerBindPort;
+        internal double PeerFrameRateInternal;
 
         internal IPEndPoint PeerLocalToRemoteSocket;
         internal IPEndPoint PeerRemoteToLocalSocket;
+        internal double PeerServerJitterInternal;
+        internal double PeerServerPingInternal;
 
         internal IChannel PeerUdpChannel;
         internal IEventLoopGroup PeerUdpEventLoopGroup;
@@ -59,6 +67,18 @@ namespace Nexum.Client
             UdpFragBoard.MtuDiscovery = MtuDiscovery;
             UdpFragBoard.DefragBoard = UdpDefragBoard;
         }
+
+        public double Ping => RecentPing;
+
+        public double Jitter => JitterInternal;
+
+        public double PeerTimeDifference => IndirectServerTimeDiff;
+
+        public double PeerFrameRate => PeerFrameRateInternal;
+
+        public double ServerPing => PeerServerPingInternal;
+
+        public double ServerJitter => PeerServerJitterInternal;
 
         public uint GroupId { get; }
         public uint HostId { get; }
@@ -138,6 +158,24 @@ namespace Nexum.Client
                     ReliableUdpConfig.P2PPingInterval,
                     Random.Shared.NextDouble());
             }
+
+            if (currentTime >= _nextTimeSyncTime)
+            {
+                SendTimeSyncPing();
+                _nextTimeSyncTime = currentTime + Core.SysUtil.Lerp(
+                    ReliableUdpConfig.P2PTimeSyncInterval * 0.5,
+                    ReliableUdpConfig.P2PTimeSyncInterval,
+                    Random.Shared.NextDouble());
+            }
+        }
+
+        private void SendTimeSyncPing()
+        {
+            var pingMsg = new NetMessage();
+            pingMsg.Write(Owner.GetAbsoluteTime());
+            pingMsg.Write(Owner.RecentFrameRate);
+
+            RmiToPeer((ushort)NexumOpCode.ReportServerTimeAndFrameRateAndPing, pingMsg, reliable: true);
         }
 
         private void FallbackP2PToRelay(bool firstChance = true)

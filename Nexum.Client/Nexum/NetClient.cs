@@ -69,6 +69,9 @@ namespace Nexum.Client
         internal Guid PeerUdpMagicNumber;
 
         internal ThreadLoop PingLoop;
+
+        internal double RecentFrameRate;
+        internal ThreadLoop ReliablePingLoop;
         internal ThreadLoop ReliableUdpLoop;
         internal IPEndPoint SelfUdpSocket;
 
@@ -76,12 +79,14 @@ namespace Nexum.Client
         internal MtuDiscovery ServerMtuDiscovery;
         internal double ServerTimeDiff;
         internal int ServerUdpFallbackCount;
+        internal double ServerUdpJitter;
 
         internal double ServerUdpLastPing;
         internal double ServerUdpLastReceivedTime;
 
         internal bool ServerUdpReadyWaiting;
         internal double ServerUdpRecentPing;
+
         internal IPEndPoint ServerUdpSocket;
         internal bool ServerUdpSocketFailed;
 
@@ -108,6 +113,14 @@ namespace Nexum.Client
 
             Clients.TryAdd(ServerType, this);
         }
+
+        public double Ping => ServerUdpRecentPing;
+
+        public double Jitter => ServerUdpJitter;
+
+        public double FrameRate => RecentFrameRate;
+
+        public double ServerTimeDifference => ServerTimeDiff;
 
         public static Action<IChannelPipeline> UdpPipelineConfigurator { get; set; }
 
@@ -282,7 +295,7 @@ namespace Nexum.Client
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        internal double GetAbsoluteTime()
+        public double GetAbsoluteTime()
         {
             return _stopwatch.Elapsed.TotalSeconds;
         }
@@ -366,10 +379,21 @@ namespace Nexum.Client
                         member.FrameMove(elapsedTime);
         }
 
+        internal void SendReliablePing()
+        {
+            if (ConnectionState != ConnectionState.Connected)
+                return;
+
+            var reliablePingMsg = new NetMessage();
+            reliablePingMsg.Write(RecentFrameRate);
+            RmiToServer((ushort)NexumOpCode.ReliablePing, reliablePingMsg);
+        }
+
         internal void SendUdpPing(TimeSpan delta)
         {
             double currentTime = GetAbsoluteTime();
 
+            UpdateFrameRate(delta);
             CheckServerUdpTimeout(currentTime);
 
             int paddingSize = ServerMtuDiscovery.GetProbePaddingSize(currentTime);
@@ -390,6 +414,18 @@ namespace Nexum.Client
             }
 
             NexumToServerUdpIfAvailable(unreliablePing, true);
+        }
+
+        private void UpdateFrameRate(TimeSpan delta)
+        {
+            double deltaSeconds = delta.TotalSeconds;
+            if (deltaSeconds > 0)
+            {
+                double instantFrameRate = 1.0 / deltaSeconds;
+                RecentFrameRate = RecentFrameRate > 0
+                    ? Core.SysUtil.Lerp(RecentFrameRate, instantFrameRate, ReliableUdpConfig.LagLinearProgrammingFactor)
+                    : instantFrameRate;
+            }
         }
 
         private void CheckServerUdpTimeout(double currentTime)
@@ -597,6 +633,7 @@ namespace Nexum.Client
             SetConnectionState(ConnectionState.Disconnected);
 
             PingLoop?.Stop();
+            ReliablePingLoop?.Stop();
             StopReliableUdpLoop();
 
             if (ToServerReliableUdp != null)

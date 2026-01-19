@@ -85,9 +85,15 @@ namespace Nexum.Server
 
         internal UdpPacketDefragBoard UdpDefragBoard { get; }
 
+        public double Ping => ClientUdpRecentPing;
+
+        public double Jitter => ClientUdpJitter;
+
         internal double ClientUdpLastPing { get; set; }
 
         internal double ClientUdpRecentPing { get; set; }
+
+        internal double ClientUdpJitter { get; set; }
 
         internal bool UdpEnabled { get; set; }
 

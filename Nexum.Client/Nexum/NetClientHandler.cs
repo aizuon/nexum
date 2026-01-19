@@ -49,7 +49,7 @@ namespace Nexum.Client
             switch (messageType)
             {
                 case MessageType.RMI:
-                    RMIHandler(client, message, udpEndPoint);
+                    RMIHandler(client, message, filterTag, udpEndPoint);
                     break;
 
                 case MessageType.Encrypted:
@@ -107,11 +107,11 @@ namespace Nexum.Client
                     break;
 
                 case MessageType.P2PRequestIndirectServerTimeAndPing:
-                    P2PRequestIndirectServerTimeAndPingHandler(client, message, udpEndPoint);
+                    P2PRequestIndirectServerTimeAndPingHandler(client, message, filterTag, udpEndPoint);
                     break;
 
                 case MessageType.P2PReplyIndirectServerTimeAndPong:
-                    P2PReplyIndirectServerTimeAndPongHandler(client, message, udpEndPoint);
+                    P2PReplyIndirectServerTimeAndPongHandler(client, message, filterTag, udpEndPoint);
                     break;
 
                 case MessageType.ReliableUdp_Frame:
@@ -171,7 +171,7 @@ namespace Nexum.Client
                 return;
             }
 
-            var sourceMember = client.P2PGroup?.FindMember(client.HostId, udpEndPoint, filterTag);
+            var sourceMember = client.P2PGroup?.FindMember(client.HostId, udpEndPoint, filterTag, message.RelayFrom);
             if (sourceMember == null)
             {
                 client.Logger.Verbose(
@@ -643,6 +643,7 @@ namespace Nexum.Client
         }
 
         private static void P2PRequestIndirectServerTimeAndPingHandler(NetClient client, NetMessage message,
+            ushort filterTag,
             IPEndPoint udpEndPoint)
         {
             if (!message.Read(out double time))
@@ -650,7 +651,7 @@ namespace Nexum.Client
 
             message.Read(out int paddingSize);
 
-            var p2pMember = client.P2PGroup?.FindMember(client.HostId, udpEndPoint);
+            var p2pMember = client.P2PGroup?.FindMember(client.HostId, udpEndPoint, filterTag, message.RelayFrom);
             if (p2pMember != null)
             {
                 p2pMember.LastUdpReceivedTime = client.GetAbsoluteTime();
@@ -675,6 +676,7 @@ namespace Nexum.Client
         }
 
         private static void P2PReplyIndirectServerTimeAndPongHandler(NetClient client, NetMessage message,
+            ushort filterTag,
             IPEndPoint udpEndPoint)
         {
             if (!message.Read(out double sentTime))
@@ -682,7 +684,7 @@ namespace Nexum.Client
 
             message.Read(out int paddingSize);
 
-            var p2pMember = client.P2PGroup?.FindMember(client.HostId, udpEndPoint);
+            var p2pMember = client.P2PGroup?.FindMember(client.HostId, udpEndPoint, filterTag, message.RelayFrom);
             if (p2pMember != null)
             {
                 double currentTime = client.GetAbsoluteTime();
@@ -691,8 +693,13 @@ namespace Nexum.Client
                 if (lastPing < 0)
                     lastPing = 0;
 
-                p2pMember.LastPing = lastPing;
+                if (p2pMember.LastPingInternal > 0)
+                    p2pMember.JitterInternal = Core.NetUtil.CalculateJitter(p2pMember.JitterInternal, lastPing,
+                        p2pMember.LastPingInternal);
+
+                p2pMember.LastPingInternal = lastPing;
                 p2pMember.LastUdpReceivedTime = currentTime;
+
                 p2pMember.RecentPing = p2pMember.RecentPing != 0.0
                     ? Core.SysUtil.Lerp(p2pMember.RecentPing, lastPing, ReliableUdpConfig.LagLinearProgrammingFactor)
                     : lastPing;
@@ -711,19 +718,19 @@ namespace Nexum.Client
 
         private static void HandleP2PGroupMemberJoin(NetClient client, NetMessage message, NexumOpCode opCode)
         {
-            var byteArray1 = new ByteArray();
+            var customField = new ByteArray();
 
             if (!message.Read(out uint groupHostId) || !message.Read(out uint memberId) ||
-                !message.Read(ref byteArray1))
+                !message.Read(ref customField))
                 return;
 
             if (opCode == NexumOpCode.P2PGroup_MemberJoin)
             {
-                var byteArray2 = new ByteArray();
-                var byteArray3 = new ByteArray();
+                var sessionKey = new ByteArray();
+                var fastSessionKey = new ByteArray();
                 if (!message.Read(out uint eventId)
-                    || !message.Read(ref byteArray2)
-                    || !message.Read(ref byteArray3)
+                    || !message.Read(ref sessionKey)
+                    || !message.Read(ref fastSessionKey)
                     || !message.Read(out uint p2pFirstFrameNumber)
                     || !message.Read(out Guid peerUdpMagicNumber)
                     || !message.Read(out bool enableDirectP2P)
@@ -859,7 +866,7 @@ namespace Nexum.Client
             }
         }
 
-        private static void RMIHandler(NetClient client, NetMessage message, IPEndPoint udpEndPoint)
+        private static void RMIHandler(NetClient client, NetMessage message, ushort filterTag, IPEndPoint udpEndPoint)
         {
             ushort rmiId = 0;
             if (!message.Read(ref rmiId))
@@ -1283,20 +1290,30 @@ namespace Nexum.Client
                     break;
                 }
 
+                case NexumOpCode.ReliablePong:
+                {
+                    break;
+                }
+
                 case NexumOpCode.ReportServerTimeAndFrameRateAndPing:
                 {
-                    message.Read(out double time);
-                    message.Read(out double frameRate);
+                    if (!message.Read(out double clientLocalTime) || !message.Read(out double peerFrameRate))
+                        break;
 
-                    var p2pMember = client.P2PGroup?.FindMember(client.HostId, udpEndPoint, 0, message.RelayFrom);
+                    var p2pMember =
+                        client.P2PGroup?.FindMember(client.HostId, udpEndPoint, filterTag, message.RelayFrom);
                     if (p2pMember != null)
                     {
-                        var selfPing = new NetMessage();
-                        selfPing.Write(time);
-                        selfPing.Write(frameRate);
-                        selfPing.Reliable = true;
+                        p2pMember.PeerFrameRateInternal = peerFrameRate;
 
-                        // p2pMember.RmiToPeer((ushort)NexumOpCode.ReportServerTimeAndFrameRateAndPing, selfPing, true);
+                        var pongMsg = new NetMessage();
+                        pongMsg.Write(clientLocalTime);
+                        pongMsg.Write(client.GetAbsoluteTime());
+                        pongMsg.Write(client.ServerUdpRecentPing);
+                        pongMsg.Write(client.RecentFrameRate);
+
+                        p2pMember.RmiToPeer((ushort)NexumOpCode.ReportServerTimeAndFrameRateAndPong, pongMsg,
+                            reliable: true);
                     }
 
                     break;
@@ -1304,22 +1321,29 @@ namespace Nexum.Client
 
                 case NexumOpCode.ReportServerTimeAndFrameRateAndPong:
                 {
-                    message.Read(out double clientTime);
-                    message.Read(out double serverTime);
-                    message.Read(out double serverPing);
-                    message.Read(out double frameRate);
+                    if (!message.Read(out double _) ||
+                        !message.Read(out double peerLocalTime) ||
+                        !message.Read(out double peerServerPing) ||
+                        !message.Read(out double peerFrameRate))
+                        break;
 
-                    var p2pMember = client.P2PGroup?.FindMember(client.HostId, udpEndPoint, 0, message.RelayFrom);
+                    var p2pMember =
+                        client.P2PGroup?.FindMember(client.HostId, udpEndPoint, filterTag, message.RelayFrom);
                     if (p2pMember != null)
                     {
-                        var selfPong = new NetMessage();
-                        selfPong.Write(clientTime);
-                        selfPong.Write(serverTime);
-                        selfPong.Write(serverPing);
-                        selfPong.Write(frameRate);
-                        selfPong.Reliable = true;
+                        double currentTime = client.GetAbsoluteTime();
+                        double peerToServerPing = Math.Max(peerServerPing, 0.0);
 
-                        // p2pMember.RmiToPeer((ushort)NexumOpCode.ReportServerTimeAndFrameRateAndPong, selfPong, true);
+                        if (p2pMember.LastPeerServerPing > 0)
+                            p2pMember.PeerServerJitterInternal = Core.NetUtil.CalculateJitter(
+                                p2pMember.PeerServerJitterInternal, peerToServerPing, p2pMember.LastPeerServerPing);
+
+                        p2pMember.LastPeerServerPing = peerToServerPing;
+                        p2pMember.PeerServerPingInternal = peerToServerPing;
+                        p2pMember.PeerFrameRateInternal = peerFrameRate;
+
+                        double estimatedPeerTime = peerLocalTime + p2pMember.RecentPing;
+                        p2pMember.IndirectServerTimeDiff = currentTime - estimatedPeerTime;
                     }
 
                     break;
@@ -1450,6 +1474,17 @@ namespace Nexum.Client
             client.UdpDefragBoard.LocalHostId = hostId;
             client.ServerGuid = serverGuid;
             client.SetConnectionState(ConnectionState.Connected);
+
+            if (client.ReliablePingLoop == null)
+            {
+                double reliablePingInterval = (client.NetSettings?.IdleTimeout ?? NetConfig.NoPingTimeoutTime) * 0.3;
+                client.ReliablePingLoop = new ThreadLoop(
+                    TimeSpan.FromSeconds(reliablePingInterval),
+                    client.SendReliablePing);
+            }
+
+            client.ReliablePingLoop.Start();
+
             client.OnConnectionComplete();
         }
 
@@ -1495,6 +1530,10 @@ namespace Nexum.Client
 
             if (lastPing < 0)
                 lastPing = 0;
+
+            if (client.ServerUdpLastPing > 0)
+                client.ServerUdpJitter =
+                    Core.NetUtil.CalculateJitter(client.ServerUdpJitter, lastPing, client.ServerUdpLastPing);
 
             client.ServerUdpLastPing = lastPing;
             client.ServerUdpLastReceivedTime = currentTime;

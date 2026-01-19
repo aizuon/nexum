@@ -187,7 +187,7 @@ namespace Nexum.Server
                 EnableServerLog = false,
                 FallbackMethod = FallbackMethod.None,
                 MessageMaxLength = NetConfig.MessageMaxLength,
-                IdleTimeout = 900,
+                IdleTimeout = NetConfig.NoPingTimeoutTime,
                 DirectP2PStartCondition = DirectP2PStartCondition.Always,
                 OverSendSuspectingThresholdInBytes = NetConfig.DefaultOverSendSuspectingThresholdInBytes,
                 EnableNagleAlgorithm = true,

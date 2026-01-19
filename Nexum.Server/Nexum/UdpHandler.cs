@@ -14,7 +14,7 @@ namespace Nexum.Server
         internal static readonly ILogger
             Logger = Log.ForContext(Constants.SourceContextPropertyName, nameof(UdpHandler));
 
-        private static readonly Stopwatch Stopwatch = Stopwatch.StartNew();
+        private readonly Stopwatch _stopwatch = Stopwatch.StartNew();
 
         internal readonly NetServer Owner;
 
@@ -37,7 +37,7 @@ namespace Nexum.Server
                 var defragResult = Owner.UdpDefragBoard.PushFragment(
                     message,
                     (uint)HostId.None,
-                    Stopwatch.Elapsed.TotalSeconds,
+                    _stopwatch.Elapsed.TotalSeconds,
                     out var holepunchPacket,
                     out string defragError);
 

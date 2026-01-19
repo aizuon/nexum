@@ -44,6 +44,8 @@ namespace Nexum.Core
 
         internal const double P2PPingInterval = UdpPingInterval;
 
+        internal const double P2PTimeSyncInterval = UdpPingInterval;
+
         internal const double FallbackServerUdpToTcpTimeout = CsPingInterval * 4.0;
 
         internal const double FallbackP2PUdpToTcpTimeout = P2PPingInterval * 4.0;
@@ -51,6 +53,7 @@ namespace Nexum.Core
         internal const int ServerUdpRepunchMaxTrialCount = 3;
 
         internal const double LagLinearProgrammingFactor = 0.8;
+
         internal static int FrameLength => Math.Max(1300, FragmentConfig.MtuLength - 100);
 
         internal static int MaxAckCountInOneFrame => (FragmentConfig.MtuLength - 10) / 5;
