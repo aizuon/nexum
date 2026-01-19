@@ -149,6 +149,26 @@ namespace Nexum.Core.Simulation
                 NatType = NatType.PortRestricted
             };
 
+        public static NetworkProfile AddressRestrictedNat =>
+            new NetworkProfile
+            {
+                Name = "Address Restricted NAT",
+                LatencyMs = 15,
+                JitterMs = 8,
+                PacketLossRate = 0.005,
+                NatType = NatType.AddressRestricted
+            };
+
+        public static NetworkProfile FullConeNat =>
+            new NetworkProfile
+            {
+                Name = "Full Cone NAT",
+                LatencyMs = 15,
+                JitterMs = 5,
+                PacketLossRate = 0.002,
+                NatType = NatType.FullCone
+            };
+
         public static NetworkProfile[] All => new[]
         {
             Ideal, HomeWifi, Mobile4G, PoorMobile, CongestedWifi,
@@ -158,6 +178,11 @@ namespace Nexum.Core.Simulation
         public static NetworkProfile[] Common => new[]
         {
             Ideal, HomeWifi, Mobile4G
+        };
+
+        public static NetworkProfile[] NatProfiles => new[]
+        {
+            FullConeNat, AddressRestrictedNat, PortRestrictedNat, SymmetricNat
         };
 
         public static NetworkProfile GetByName(string name)
@@ -174,6 +199,8 @@ namespace Nexum.Core.Simulation
                 "Bursty Loss" or "BurstyLoss" => BurstyLoss,
                 "Symmetric NAT" or "SymmetricNat" => SymmetricNat,
                 "Port Restricted NAT" or "PortRestrictedNat" => PortRestrictedNat,
+                "Address Restricted NAT" or "AddressRestrictedNat" => AddressRestrictedNat,
+                "Full Cone NAT" or "FullConeNat" => FullConeNat,
                 _ => Ideal
             };
         }

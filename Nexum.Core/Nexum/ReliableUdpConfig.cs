@@ -38,7 +38,7 @@ namespace Nexum.Core
 
         internal const double AckSendInterval = 0.05;
 
-        internal const double UdpPingInterval = 3.0;
+        internal const double UdpPingInterval = 2.0;
 
         internal const double CsPingInterval = UdpPingInterval;
 

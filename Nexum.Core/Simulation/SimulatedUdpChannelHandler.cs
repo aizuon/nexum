@@ -25,6 +25,9 @@ namespace Nexum.Core.Simulation
         private readonly ConcurrentDictionary<IPEndPoint, int> _symmetricPortMappings =
             new ConcurrentDictionary<IPEndPoint, int>();
 
+        private readonly ConcurrentDictionary<IPEndPoint, int> _symmetricHolepunchAttempts =
+            new ConcurrentDictionary<IPEndPoint, int>();
+
         private readonly object _syncLock = new object();
 
         private long _bytesSentThisSecond;
@@ -414,9 +417,22 @@ namespace Nexum.Core.Simulation
                     return _allowedEndpoints.ContainsKey(sender);
 
                 case NatType.Symmetric:
-                    if (!_allowedEndpoints.ContainsKey(sender))
-                        return false;
-                    return _random.NextDouble() > 0.3;
+                    if (_allowedEndpoints.ContainsKey(sender))
+                        return true;
+
+                    int attempts = _symmetricHolepunchAttempts.AddOrUpdate(sender, 1, (_, count) => count + 1);
+
+                    if (attempts >= 5)
+                    {
+                        double successChance = Math.Min(0.25, 0.05 + (attempts - 5) * 0.02);
+                        if (_random.NextDouble() < successChance)
+                        {
+                            _allowedEndpoints[sender] = DateTime.UtcNow;
+                            return true;
+                        }
+                    }
+
+                    return false;
 
                 default:
                     return true;
@@ -456,6 +472,7 @@ namespace Nexum.Core.Simulation
                 {
                     _allowedEndpoints.TryRemove(kvp.Key, out _);
                     _symmetricPortMappings.TryRemove(kvp.Key, out _);
+                    _symmetricHolepunchAttempts.TryRemove(kvp.Key, out _);
                 }
         }
 
