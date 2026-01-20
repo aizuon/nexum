@@ -46,9 +46,14 @@ jobs:
 
       - name: Create S3 bucket if not exists
         run: |
-          aws s3api head-bucket --bucket nexum-e2e-artifacts 2>/dev/null || \
-          aws s3api create-bucket --bucket nexum-e2e-artifacts --region ${{ secrets.AWS_REGION }} \
-            --create-bucket-configuration LocationConstraint=${{ secrets.AWS_REGION }}
+          if aws s3api head-bucket --bucket nexum-e2e-artifacts 2>/dev/null; then
+            echo "Bucket already exists"
+          elif [ "${{ secrets.AWS_REGION }}" = "us-east-1" ]; then
+            aws s3api create-bucket --bucket nexum-e2e-artifacts --region us-east-1
+          else
+            aws s3api create-bucket --bucket nexum-e2e-artifacts --region ${{ secrets.AWS_REGION }} \
+              --create-bucket-configuration LocationConstraint=${{ secrets.AWS_REGION }}
+          fi
 
       - name: Upload E2E binaries to S3
         run: |
