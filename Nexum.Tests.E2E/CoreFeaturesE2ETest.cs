@@ -17,8 +17,6 @@ namespace Nexum.Tests.E2E
         private Ec2Orchestrator _ec2Orchestrator;
         private IamProvisioner _iamProvisioner;
 
-        private S3Deployer _s3Deployer;
-
         private Ec2Instance _serverInstance;
         private SsmCommandRunner _ssmRunner;
 
@@ -70,7 +68,6 @@ namespace Nexum.Tests.E2E
                 _logger.Warning(ex, "Error during IAM cleanup");
             }
 
-            _s3Deployer?.Dispose();
             _ssmRunner?.Dispose();
 
             _logger.Information("Cleanup complete");
@@ -80,9 +77,6 @@ namespace Nexum.Tests.E2E
         public async Task AllCoreFeatures_OnSeparateEc2Instances_Pass()
         {
             _logger.Information("=== Phase 1: Provisioning AWS Resources ===");
-
-            _s3Deployer = new S3Deployer();
-            await _s3Deployer.EnsureBucketExistsAsync();
 
             _iamProvisioner = new IamProvisioner();
             string instanceProfileArn = await _iamProvisioner.ProvisionAsync();

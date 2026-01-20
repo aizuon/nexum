@@ -1,9 +1,7 @@
 using System;
 using System.IO;
-using System.Net;
 using System.Threading.Tasks;
 using Amazon.S3;
-using Amazon.S3.Model;
 using Amazon.S3.Transfer;
 using Serilog;
 
@@ -25,28 +23,6 @@ namespace Nexum.Tests.E2E.Orchestration
         public void Dispose()
         {
             _s3Client?.Dispose();
-        }
-
-        public async Task EnsureBucketExistsAsync()
-        {
-            try
-            {
-                await _s3Client.GetBucketLocationAsync(_bucketName);
-                _logger.Information("S3 bucket {BucketName} already exists", _bucketName);
-            }
-            catch (AmazonS3Exception ex) when (ex.StatusCode == HttpStatusCode.NotFound)
-            {
-                _logger.Information("Creating S3 bucket {BucketName}", _bucketName);
-
-                var request = new PutBucketRequest
-                {
-                    BucketName = _bucketName,
-                    UseClientRegion = true
-                };
-
-                await _s3Client.PutBucketAsync(request);
-                _logger.Information("S3 bucket {BucketName} created", _bucketName);
-            }
         }
 
         public async Task UploadFileAsync(string localFilePath, string s3Key)
