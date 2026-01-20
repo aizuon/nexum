@@ -948,9 +948,13 @@ namespace Nexum.Client
                     if (!message.ReadStringEndPoint(ref udpSocket))
                         return;
 
-                    client.Logger.Debug("S2C_RequestCreateUdpSocket => {UdpSocket}", udpSocket);
+                    var serverTcpAddress = ((IPEndPoint)client.Channel.RemoteAddress).Address.MapToIPv4();
+                    var actualUdpEndpoint = new IPEndPoint(serverTcpAddress, udpSocket.Port);
 
-                    client.ServerUdpSocket = udpSocket;
+                    client.Logger.Debug("S2C_RequestCreateUdpSocket => server sent {SentSocket}, using {ActualSocket}",
+                        udpSocket, actualUdpEndpoint);
+
+                    client.ServerUdpSocket = actualUdpEndpoint;
 
                     if (client.UdpChannel != null)
                     {
@@ -1009,9 +1013,16 @@ namespace Nexum.Client
                         return;
                     }
 
-                    client.Logger.Information("S2C_CreateUdpSocketAck => {UdpSocket}", udpSocket);
+                    // Use the server's actual IP from the TCP connection, not the loopback sent by server
+                    // This enables UDP holepunching to work across different machines
+                    var serverTcpAddress = ((IPEndPoint)client.Channel.RemoteAddress).Address;
+                    var actualUdpEndpoint = new IPEndPoint(serverTcpAddress, udpSocket.Port);
 
-                    client.ServerUdpSocket = udpSocket;
+                    client.Logger.Information(
+                        "S2C_CreateUdpSocketAck => server sent {SentSocket}, using {ActualSocket}", udpSocket,
+                        actualUdpEndpoint);
+
+                    client.ServerUdpSocket = actualUdpEndpoint;
 
                     if (client.UdpChannel == null && !client.ServerUdpSocketFailed)
                         Task.Run(() =>
