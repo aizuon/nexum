@@ -175,6 +175,11 @@ namespace Nexum.Tests.E2E
             var client1Result = clientResults[0];
             var client2Result = clientResults[1];
 
+            var serverLogResult = await _ssmRunner.RunCommandAsync(_serverInstance.InstanceId,
+                "cat /tmp/e2e-output.log 2>/dev/null || echo 'No server log file'",
+                TimeSpan.FromSeconds(30));
+            _logger.Information("Server output:\n{Output}", serverLogResult.StandardOutput);
+
             _logger.Information("Client 1 output:\n{Output}", client1Result.StandardOutput);
             _logger.Information("Client 2 output:\n{Output}", client2Result.StandardOutput);
 
