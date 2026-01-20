@@ -176,14 +176,6 @@ namespace Nexum.Tests.E2E
             return $@"
 set -e
 
-# Install .NET 10 runtime
-if ! command -v dotnet &> /dev/null; then
-    echo 'Installing .NET 10 runtime...'
-    curl -sSL https://dot.net/v1/dotnet-install.sh | bash -s -- --channel 10.0 --runtime dotnet
-    export PATH=""$HOME/.dotnet:$PATH""
-    echo 'export PATH=""$HOME/.dotnet:$PATH""' >> ~/.bashrc
-fi
-
 # Create directory and download binaries
 mkdir -p /tmp/e2e
 cd /tmp/e2e
