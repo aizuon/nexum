@@ -473,8 +473,11 @@ namespace Nexum.Client
         public void RmiToServer(ushort rmiId, NetMessage message, EncryptMode ecMode = EncryptMode.Secure)
         {
             var data = new NetMessage();
+            data.Reliable = true;
             if (ecMode != EncryptMode.None)
-                message.EncryptMode = ecMode;
+                data.EncryptMode = ecMode;
+            if (message.Compress)
+                data.Compress = true;
 
             data.WriteEnum(MessageType.RMI);
             data.Write(rmiId);
@@ -489,14 +492,7 @@ namespace Nexum.Client
                 if (data.Compress)
                     data = NetZip.CompressPacket(data);
                 if (data.Encrypt)
-                {
-                    byte[] encryptedBuffer = Crypt.Encrypt(data.GetBuffer(), data.EncryptMode);
-                    var netMessage = new NetMessage();
-                    netMessage.WriteEnum(MessageType.Encrypted);
-                    netMessage.WriteEnum(data.EncryptMode);
-                    netMessage.Write(new ByteArray(encryptedBuffer));
-                    data = netMessage;
-                }
+                    data = Crypt.CreateEncryptedMessage(data);
 
                 var message = new NetMessage();
                 message.Write((ByteArray)data);
@@ -516,17 +512,21 @@ namespace Nexum.Client
         }
 
         public void RmiToServerUdpIfAvailable(ushort rmiId, NetMessage message, EncryptMode ecMode = EncryptMode.Fast,
+            bool force = false,
             bool reliable = false)
         {
             var data = new NetMessage();
+            data.Reliable = reliable;
             if (ecMode != EncryptMode.None)
-                message.EncryptMode = ecMode;
+                data.EncryptMode = ecMode;
+            if (message.Compress)
+                data.Compress = true;
 
             data.WriteEnum(MessageType.RMI);
             data.Write(rmiId);
             data.Write(message);
 
-            NexumToServerUdpIfAvailable(data, reliable: reliable);
+            NexumToServerUdpIfAvailable(data, force, reliable);
         }
 
         internal void NexumToServerUdpIfAvailable(NetMessage data, bool force = false, bool reliable = false)
@@ -539,14 +539,7 @@ namespace Nexum.Client
                 if (data.Compress)
                     data = NetZip.CompressPacket(data);
                 if (data.Encrypt)
-                {
-                    byte[] encryptedBuffer = Crypt.Encrypt(data.GetBuffer(), data.EncryptMode);
-                    var netMessage = new NetMessage();
-                    netMessage.WriteEnum(MessageType.Encrypted);
-                    netMessage.WriteEnum(data.EncryptMode);
-                    netMessage.Write(new ByteArray(encryptedBuffer));
-                    data = netMessage;
-                }
+                    data = Crypt.CreateEncryptedMessage(data);
 
                 if ((UdpEnabled || force) && UdpChannel != null && ServerUdpSocket != null)
                 {
@@ -590,7 +583,7 @@ namespace Nexum.Client
                 return;
             }
 
-            foreach (var udpMessage in UdpFragBoard.FragmentPacket(data, data.Length, HostId,
+            foreach (var udpMessage in UdpFragBoard.FragmentPacket(data, HostId,
                          (uint)Core.HostId.Server))
             {
                 udpMessage.EndPoint = ServerUdpSocket;

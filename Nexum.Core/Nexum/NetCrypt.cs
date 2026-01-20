@@ -64,6 +64,16 @@ namespace Nexum.Core
             _rc4Key = new KeyParameter(key);
         }
 
+        public NetMessage CreateEncryptedMessage(NetMessage data)
+        {
+            byte[] encryptedBuffer = Encrypt(data.GetBufferSpan(), data.EncryptMode);
+            var encryptedMessage = new NetMessage();
+            encryptedMessage.WriteEnum(MessageType.Encrypted);
+            encryptedMessage.WriteEnum(data.EncryptMode);
+            encryptedMessage.Write(new ByteArray(encryptedBuffer, true));
+            return encryptedMessage;
+        }
+
         public byte[] GetKey()
         {
             return _aesKey?.GetKey();
@@ -124,10 +134,10 @@ namespace Nexum.Core
 
         public byte[] Encrypt(byte[] data, EncryptMode mode)
         {
-            return Encrypt(data, data.Length, mode);
+            return Encrypt(data.AsSpan(), mode);
         }
 
-        public byte[] Encrypt(byte[] data, int length, EncryptMode mode)
+        public byte[] Encrypt(ReadOnlySpan<byte> data, EncryptMode mode)
         {
             if (_aesKey == null)
                 throw new ObjectDisposedException(GetType().FullName);
@@ -138,13 +148,13 @@ namespace Nexum.Core
                 {
                     lock (_aesLock)
                     {
-                        int contentSize = 1 + 4 + length;
+                        int contentSize = 1 + 4 + data.Length;
                         int paddingNeeded = AesBlockSize - contentSize % AesBlockSize;
                         if (paddingNeeded == 0)
                             paddingNeeded = AesBlockSize;
 
                         int totalSize = contentSize + paddingNeeded;
-                        uint crc32 = Hash.GetUInt32<CRC32>(data, 0, length);
+                        uint crc32 = Hash.GetUInt32<CRC32>(data);
 
                         byte[] plaintext = ArrayPool<byte>.Shared.Rent(totalSize);
                         try
@@ -154,8 +164,8 @@ namespace Nexum.Core
                             plaintext[2] = (byte)(crc32 >> 8);
                             plaintext[3] = (byte)(crc32 >> 16);
                             plaintext[4] = (byte)(crc32 >> 24);
-                            Buffer.BlockCopy(data, 0, plaintext, 5, length);
-                            Array.Clear(plaintext, 5 + length, paddingNeeded);
+                            data.CopyTo(plaintext.AsSpan(5));
+                            Array.Clear(plaintext, 5 + data.Length, paddingNeeded);
 
                             var aes = new AesEngine();
                             aes.Init(true, _aesKey);
@@ -177,11 +187,11 @@ namespace Nexum.Core
                 {
                     lock (_rc4Lock)
                     {
-                        byte[] encrypted = GC.AllocateUninitializedArray<byte>(length);
+                        byte[] encrypted = GC.AllocateUninitializedArray<byte>(data.Length);
 
                         var rc4 = new RC4Engine();
                         rc4.Init(true, _rc4Key);
-                        rc4.ProcessBytes(data, 0, length, encrypted, 0);
+                        rc4.ProcessBytes(data, encrypted.AsSpan());
 
                         return encrypted;
                     }
@@ -194,10 +204,10 @@ namespace Nexum.Core
 
         public byte[] Decrypt(byte[] data, EncryptMode mode)
         {
-            return Decrypt(data, data.Length, mode);
+            return Decrypt(data.AsSpan(), mode);
         }
 
-        public byte[] Decrypt(byte[] data, int length, EncryptMode mode)
+        public byte[] Decrypt(ReadOnlySpan<byte> data, EncryptMode mode)
         {
             if (_aesKey == null)
                 throw new ObjectDisposedException(GetType().FullName);
@@ -208,17 +218,17 @@ namespace Nexum.Core
                 {
                     lock (_aesLock)
                     {
-                        byte[] decrypted = ArrayPool<byte>.Shared.Rent(length);
+                        byte[] decrypted = ArrayPool<byte>.Shared.Rent(data.Length);
                         try
                         {
                             var aes = new AesEngine();
                             aes.Init(false, _aesKey);
 
-                            for (int i = 0; i < length; i += AesBlockSize)
-                                aes.ProcessBlock(data, i, decrypted, i);
+                            for (int i = 0; i < data.Length; i += AesBlockSize)
+                                aes.ProcessBlock(data.Slice(i, AesBlockSize), decrypted.AsSpan(i, AesBlockSize));
 
                             byte paddingLen = decrypted[0];
-                            int dataLen = length - 1 - 4 - paddingLen;
+                            int dataLen = data.Length - 1 - 4 - paddingLen;
                             byte[] result = GC.AllocateUninitializedArray<byte>(dataLen);
                             Buffer.BlockCopy(decrypted, 5, result, 0, dataLen);
                             return result;
@@ -234,11 +244,11 @@ namespace Nexum.Core
                 {
                     lock (_rc4Lock)
                     {
-                        byte[] decrypted = GC.AllocateUninitializedArray<byte>(length);
+                        byte[] decrypted = GC.AllocateUninitializedArray<byte>(data.Length);
 
                         var rc4 = new RC4Engine();
                         rc4.Init(false, _rc4Key);
-                        rc4.ProcessBytes(data, 0, length, decrypted, 0);
+                        rc4.ProcessBytes(data, decrypted.AsSpan());
 
                         return decrypted;
                     }

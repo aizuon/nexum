@@ -25,6 +25,14 @@ namespace BaseLib
             return GetBytes<T>(data, 0, data.Length);
         }
 
+        public static byte[] GetBytes<T>(ReadOnlySpan<byte> data) where T : HashAlgorithm, new()
+        {
+            using var val = new T();
+            byte[] result = new byte[val.HashSize / 8];
+            val.TryComputeHash(data, result, out _);
+            return result;
+        }
+
         public static byte[] GetBytes<T>(string data, Encoding encoding = null) where T : HashAlgorithm, new()
         {
             encoding ??= Encoding.ASCII;
@@ -48,6 +56,14 @@ namespace BaseLib
         public static string GetString<T>(byte[] data) where T : HashAlgorithm, new()
         {
             return GetString<T>(data, 0, data.Length);
+        }
+
+        public static string GetString<T>(ReadOnlySpan<byte> data) where T : HashAlgorithm, new()
+        {
+            using var val = new T();
+            Span<byte> value = stackalloc byte[val.HashSize / 8];
+            val.TryComputeHash(data, value, out _);
+            return Convert.ToHexStringLower(value);
         }
 
         public static string GetString<T>(string data, Encoding encoding = null) where T : HashAlgorithm, new()
@@ -75,6 +91,14 @@ namespace BaseLib
             return GetUInt16<T>(data, 0, data.Length);
         }
 
+        public static ushort GetUInt16<T>(ReadOnlySpan<byte> data) where T : HashAlgorithm, new()
+        {
+            using var val = new T();
+            Span<byte> value = stackalloc byte[val.HashSize / 8];
+            val.TryComputeHash(data, value, out _);
+            return BinaryPrimitives.ReadUInt16LittleEndian(value);
+        }
+
         public static ushort GetUInt16<T>(string data, Encoding encoding = null) where T : HashAlgorithm, new()
         {
             encoding ??= Encoding.ASCII;
@@ -100,6 +124,14 @@ namespace BaseLib
             return GetUInt32<T>(data, 0, data.Length);
         }
 
+        public static uint GetUInt32<T>(ReadOnlySpan<byte> data) where T : HashAlgorithm, new()
+        {
+            using var val = new T();
+            Span<byte> value = stackalloc byte[val.HashSize / 8];
+            val.TryComputeHash(data, value, out _);
+            return BinaryPrimitives.ReadUInt32LittleEndian(value);
+        }
+
         public static uint GetUInt32<T>(string data, Encoding encoding = null) where T : HashAlgorithm, new()
         {
             encoding ??= Encoding.ASCII;
@@ -123,6 +155,14 @@ namespace BaseLib
         public static ulong GetUInt64<T>(byte[] data) where T : HashAlgorithm, new()
         {
             return GetUInt64<T>(data, 0, data.Length);
+        }
+
+        public static ulong GetUInt64<T>(ReadOnlySpan<byte> data) where T : HashAlgorithm, new()
+        {
+            using var val = new T();
+            Span<byte> value = stackalloc byte[val.HashSize / 8];
+            val.TryComputeHash(data, value, out _);
+            return BinaryPrimitives.ReadUInt64LittleEndian(value);
         }
 
         public static ulong GetUInt64<T>(string data, Encoding encoding = null) where T : HashAlgorithm, new()

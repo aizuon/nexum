@@ -54,10 +54,9 @@ namespace Nexum.Server
                     return;
                 }
 
-                var netMessage = new NetMessage(new ByteArray(holepunchPacket.Packet.AssembledData,
-                    holepunchPacket.Packet.AssembledData.Length));
+                var holepunchMessage = new NetMessage(holepunchPacket.Packet.AssembledData, true);
 
-                netMessage.Read(out byte coreid);
+                holepunchMessage.Read(out byte coreid);
                 var messageType = (MessageType)coreid;
 
                 if (messageType != MessageType.ServerHolepunch)
@@ -68,7 +67,7 @@ namespace Nexum.Server
                     return;
                 }
 
-                netMessage.Read(out Guid magicNumber);
+                holepunchMessage.Read(out Guid magicNumber);
 
                 Owner.MagicNumberSessions.TryGetValue(magicNumber, out var session2);
 
@@ -132,9 +131,8 @@ namespace Nexum.Server
                 return;
             }
 
-            var netMessage2 = new NetMessage(new ByteArray(assembledPacket.Packet.AssembledData,
-                assembledPacket.Packet.AssembledData.Length));
-            NetServerHandler.ReadFrame(Owner, session, netMessage2, message.EndPoint, true);
+            var assembledMessage = new NetMessage(assembledPacket.Packet.AssembledData, true);
+            NetServerHandler.ReadFrame(Owner, session, assembledMessage, message.EndPoint, true);
 
             message.Content.Release();
         }

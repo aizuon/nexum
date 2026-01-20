@@ -32,30 +32,30 @@ namespace Nexum.Core
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public IEnumerable<UdpMessage> FragmentPacket(byte[] payload, int payloadLength, uint srcHostId,
+        public IEnumerable<UdpMessage> FragmentPacket(byte[] payload, uint srcHostId,
             uint destHostId)
         {
             ushort filterTag = FilterTag.Create(srcHostId, destHostId);
-            return FragmentPacket(payload, payloadLength, filterTag);
+            return FragmentPacket(payload, filterTag);
         }
 
-        public IEnumerable<UdpMessage> FragmentPacket(byte[] payload, int payloadLength, ushort filterTag)
+        public IEnumerable<UdpMessage> FragmentPacket(byte[] payload, ushort filterTag)
         {
-            if (payloadLength <= 0)
+            if (payload.Length <= 0)
                 yield break;
 
             int mtuLength = GetEffectiveMtu();
 
-            if (payloadLength <= mtuLength)
+            if (payload.Length <= mtuLength)
             {
                 yield return new UdpMessage
                 {
                     SplitterFlag = Constants.UdpFullPacketSplitter,
                     FilterTag = filterTag,
-                    PacketLength = payloadLength,
+                    PacketLength = payload.Length,
                     PacketId = 0,
                     FragmentId = 0,
-                    Content = Unpooled.WrappedBuffer(payload, 0, payloadLength)
+                    Content = Unpooled.WrappedBuffer(payload, 0, payload.Length)
                 };
                 yield break;
             }
@@ -64,15 +64,15 @@ namespace Nexum.Core
             int offset = 0;
             uint fragmentId = 0;
 
-            while (offset < payloadLength)
+            while (offset < payload.Length)
             {
-                int fragmentPayloadSize = Math.Min(mtuLength, payloadLength - offset);
+                int fragmentPayloadSize = Math.Min(mtuLength, payload.Length - offset);
 
                 yield return new UdpMessage
                 {
                     SplitterFlag = Constants.UdpFragmentSplitter,
                     FilterTag = filterTag,
-                    PacketLength = payloadLength,
+                    PacketLength = payload.Length,
                     PacketId = packetId,
                     FragmentId = fragmentId,
                     Content = Unpooled.WrappedBuffer(payload, offset, fragmentPayloadSize)

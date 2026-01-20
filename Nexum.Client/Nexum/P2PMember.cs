@@ -33,6 +33,8 @@ namespace Nexum.Client
 
         internal object P2PMutex = new object();
         internal int PeerBindPort;
+
+        internal NetCrypt PeerCrypt;
         internal double PeerFrameRateInternal;
 
         internal IPEndPoint PeerLocalToRemoteSocket;
@@ -171,11 +173,12 @@ namespace Nexum.Client
 
         private void SendTimeSyncPing()
         {
-            var pingMsg = new NetMessage();
-            pingMsg.Write(Owner.GetAbsoluteTime());
-            pingMsg.Write(Owner.RecentFrameRate);
+            var reportServerTimeAndFrameRatePing = new NetMessage();
+            reportServerTimeAndFrameRatePing.Write(Owner.GetAbsoluteTime());
+            reportServerTimeAndFrameRatePing.Write(Owner.RecentFrameRate);
 
-            RmiToPeer((ushort)NexumOpCode.ReportServerTimeAndFrameRateAndPing, pingMsg, reliable: true);
+            RmiToPeer((ushort)NexumOpCode.ReportServerTimeAndFrameRateAndPing, reportServerTimeAndFrameRatePing,
+                reliable: true);
         }
 
         private void FallbackP2PToRelay(bool firstChance = true)
@@ -208,15 +211,15 @@ namespace Nexum.Client
 
             if (firstChance)
             {
-                var notify = new NetMessage();
-                notify.Write(HostId);
-                notify.WriteEnum(ErrorType.P2PUdpFailed);
-                Owner.RmiToServer((ushort)NexumOpCode.P2P_NotifyDirectP2PDisconnected, notify);
+                var notifyDirectP2PDisconnected = new NetMessage();
+                notifyDirectP2PDisconnected.Write(HostId);
+                notifyDirectP2PDisconnected.WriteEnum(ErrorType.P2PUdpFailed);
+                Owner.RmiToServer((ushort)NexumOpCode.P2P_NotifyDirectP2PDisconnected, notifyDirectP2PDisconnected);
             }
 
-            var jitNotify = new NetMessage();
-            jitNotify.Write(HostId);
-            Owner.RmiToServer((ushort)NexumOpCode.NotifyJitDirectP2PTriggered, jitNotify);
+            var notifyJitDirectP2PTriggered = new NetMessage();
+            notifyJitDirectP2PTriggered.Write(HostId);
+            Owner.RmiToServer((ushort)NexumOpCode.NotifyJitDirectP2PTriggered, notifyJitDirectP2PTriggered);
         }
 
         private void SendP2PPing()
@@ -224,26 +227,32 @@ namespace Nexum.Client
             double currentTime = Owner.GetAbsoluteTime();
             int paddingSize = MtuDiscovery.GetProbePaddingSize(currentTime);
 
-            var pingMsg = new NetMessage();
-            pingMsg.WriteEnum(MessageType.P2PRequestIndirectServerTimeAndPing);
-            pingMsg.Write(currentTime);
+            var p2pRequestIndirectServerTimeAndPing = new NetMessage();
+            p2pRequestIndirectServerTimeAndPing.WriteEnum(MessageType.P2PRequestIndirectServerTimeAndPing);
+            p2pRequestIndirectServerTimeAndPing.Write(currentTime);
 
             if (paddingSize > 0)
             {
-                pingMsg.Write(paddingSize);
-                pingMsg.WriteZeroes(paddingSize);
+                p2pRequestIndirectServerTimeAndPing.Write(paddingSize);
+                p2pRequestIndirectServerTimeAndPing.WriteZeroes(paddingSize);
             }
             else
             {
-                pingMsg.Write(0);
+                p2pRequestIndirectServerTimeAndPing.Write(0);
             }
 
-            NexumToPeer(pingMsg);
+            NexumToPeer(p2pRequestIndirectServerTimeAndPing);
         }
 
-        public void RmiToPeer(ushort rmiId, NetMessage message, bool forceRelay = false, bool reliable = false)
+        public void RmiToPeer(ushort rmiId, NetMessage message, EncryptMode ecMode = EncryptMode.Fast,
+            bool forceRelay = false, bool reliable = false)
         {
             var data = new NetMessage();
+            data.Reliable = reliable;
+            if (ecMode != EncryptMode.None)
+                data.EncryptMode = ecMode;
+            if (message.Compress)
+                data.Compress = true;
 
             data.WriteEnum(MessageType.RMI);
             data.Write(rmiId);
@@ -251,6 +260,11 @@ namespace Nexum.Client
 
             if (DirectP2P && !forceRelay)
             {
+                if (data.Compress)
+                    data = NetZip.CompressPacket(data);
+                if (data.Encrypt && PeerCrypt != null)
+                    data = PeerCrypt.CreateEncryptedMessage(data);
+
                 if (reliable && ToPeerReliableUdp != null)
                 {
                     byte[] wrappedPayload = ReliableUdpHelper.WrapPayload(data.GetBuffer());
@@ -267,6 +281,12 @@ namespace Nexum.Client
             if (reliable)
             {
                 var reliableRelay = new NetMessage();
+                reliableRelay.Reliable = true;
+                if (ecMode != EncryptMode.None)
+                    reliableRelay.EncryptMode = ecMode;
+                if (message.Compress)
+                    reliableRelay.Compress = true;
+
                 reliableRelay.WriteEnum(MessageType.ReliableRelay1);
                 reliableRelay.WriteScalar(1);
                 reliableRelay.Write(HostId);
@@ -284,6 +304,12 @@ namespace Nexum.Client
             else
             {
                 var unreliableRelay = new NetMessage();
+                unreliableRelay.Reliable = false;
+                if (ecMode != EncryptMode.None)
+                    unreliableRelay.EncryptMode = ecMode;
+                if (message.Compress)
+                    unreliableRelay.Compress = true;
+
                 unreliableRelay.WriteEnum(MessageType.UnreliableRelay1);
                 unreliableRelay.WriteEnum(MessagePriority.Ring0);
                 unreliableRelay.WriteScalar(0);
@@ -320,7 +346,7 @@ namespace Nexum.Client
                 return;
             }
 
-            foreach (var udpMessage in UdpFragBoard.FragmentPacket(data, data.Length, Owner.HostId, HostId))
+            foreach (var udpMessage in UdpFragBoard.FragmentPacket(data, Owner.HostId, HostId))
             {
                 udpMessage.EndPoint = dest;
                 channel.WriteAndFlushAsync(udpMessage);

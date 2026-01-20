@@ -80,9 +80,9 @@ namespace Nexum.Tests.Integration
                 received.Set();
             };
 
-            var testMsg = new NetMessage();
-            testMsg.Write(12345);
-            client.RmiToServerUdpIfAvailable(9001, testMsg, reliable: true);
+            var testMessage = new NetMessage();
+            testMessage.Write(12345);
+            client.RmiToServerUdpIfAvailable(9001, testMessage, reliable: true);
 
             Assert.True(received.Wait(GetAdjustedTimeout(MessageTimeout)),
                 $"[{profileName}] Server should receive UDP message");
@@ -162,9 +162,9 @@ namespace Nexum.Tests.Integration
                 received.Set();
             };
 
-            var testMsg = new NetMessage();
-            testMsg.Write(67890);
-            peer1.RmiToPeer(9002, testMsg, false, true);
+            var testMessage = new NetMessage();
+            testMessage.Write(67890);
+            peer1.RmiToPeer(9002, testMessage, forceRelay: false, reliable: true);
 
             Assert.True(received.Wait(GetAdjustedTimeout(MessageTimeout)),
                 $"[{profileName}] Client2 should receive P2P message");

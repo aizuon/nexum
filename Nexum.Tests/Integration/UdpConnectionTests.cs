@@ -90,13 +90,13 @@ namespace Nexum.Tests.Integration
                 serverToClientReceived.Set();
             };
 
-            var clientMsg = new NetMessage();
-            clientMsg.Write(12345);
-            client.RmiToServerUdpIfAvailable(6001, clientMsg, reliable: true);
+            var clientMessage = new NetMessage();
+            clientMessage.Write(12345);
+            client.RmiToServerUdpIfAvailable(6001, clientMessage, reliable: true);
 
-            var serverMsg = new NetMessage();
-            serverMsg.Write(67890);
-            session.RmiToClientUdpIfAvailable(6002, serverMsg, reliable: true);
+            var serverMessage = new NetMessage();
+            serverMessage.Write(67890);
+            session.RmiToClientUdpIfAvailable(6002, serverMessage, reliable: true);
 
             Assert.True(clientToServerReceived.Wait(GetAdjustedTimeout(ConnectionTimeout)),
                 $"[{profileName}] Server should receive UDP message");

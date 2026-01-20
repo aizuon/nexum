@@ -122,7 +122,7 @@ namespace Nexum.Server
                 if (frame.Type == ReliableUdpFrameType.Data && frame.Data != null)
                     if (ReliableUdpHelper.UnwrapPayload(frame.Data, out byte[] payload))
                     {
-                        var innerMessage = new NetMessage(new ByteArray(payload));
+                        var innerMessage = new NetMessage(payload, true);
                         ReadMessage(server, session, innerMessage, udpEndPoint);
                     }
             }
@@ -138,19 +138,19 @@ namespace Nexum.Server
             while (stream.Length > 0)
             {
                 byte[] streamData = stream.PeekAll();
-                var tempMsg = new NetMessage(new ByteArray(streamData));
+                var tempMsg = new NetMessage(streamData, true);
 
                 if (!tempMsg.Read(out ushort magic) || magic != Constants.TcpSplitter)
                     break;
 
-                var payload = new ByteArray();
-                if (!tempMsg.Read(ref payload))
+                var streamPayload = new ByteArray();
+                if (!tempMsg.Read(ref streamPayload))
                     break;
 
                 int consumedBytes = tempMsg.ReadOffset;
                 stream.PopFront(consumedBytes);
 
-                var innerMessage = new NetMessage(payload);
+                var innerMessage = new NetMessage(streamPayload);
                 ReadMessage(server, session, innerMessage, udpEndPoint);
             }
         }
@@ -183,8 +183,9 @@ namespace Nexum.Server
         {
             session.Logger.Debug("NotifyServerConnectionRequestData");
 
-            var payload = new ByteArray();
-            if (!message.Read(ref payload) || !message.Read(out Guid version) || !message.Read(out uint netVersion))
+            var connectionRequestPayload = new ByteArray();
+            if (!message.Read(ref connectionRequestPayload) || !message.Read(out Guid version) ||
+                !message.Read(out uint netVersion))
                 return;
 
             if (netVersion != Constants.NetVersion)
@@ -267,15 +268,15 @@ namespace Nexum.Server
                     destinationHostIds[i] = hostId;
                 }
 
-                var payload = new ByteArray();
-                if (!message.Read(ref payload))
+                var relayPayload = new ByteArray();
+                if (!message.Read(ref relayPayload))
                     return;
 
                 var reliableRelay2 = new NetMessage();
                 reliableRelay2.WriteEnum(MessageType.ReliableRelay2);
                 reliableRelay2.Write(session.HostId);
                 reliableRelay2.Write(0);
-                reliableRelay2.Write(payload);
+                reliableRelay2.Write(relayPayload);
                 var group = session.P2PGroup;
                 if (group == null)
                     return;
@@ -317,14 +318,14 @@ namespace Nexum.Server
                     destinationHostIds[i] = hostId;
                 }
 
-                var payload = new ByteArray();
-                if (!message.Read(ref payload))
+                var relayPayload = new ByteArray();
+                if (!message.Read(ref relayPayload))
                     return;
 
                 var unreliableRelay2 = new NetMessage();
                 unreliableRelay2.WriteEnum(MessageType.UnreliableRelay2);
                 unreliableRelay2.Write(session.HostId);
-                unreliableRelay2.Write(payload);
+                unreliableRelay2.Write(relayPayload);
                 var group = session.P2PGroup;
                 if (group == null)
                     return;

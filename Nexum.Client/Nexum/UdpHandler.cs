@@ -36,30 +36,7 @@ namespace Nexum.Client
             }
             else
             {
-                P2PMember p2pMember = null;
-                if (_owner.P2PGroup != null)
-                    foreach (var member in _owner.P2PGroup.P2PMembers.Values)
-                    {
-                        if (member.PeerLocalToRemoteSocket != null &&
-                            member.PeerLocalToRemoteSocket.Equals(message.EndPoint))
-                        {
-                            p2pMember = member;
-                            break;
-                        }
-
-                        if (member.PeerRemoteToLocalSocket != null &&
-                            member.PeerRemoteToLocalSocket.Equals(message.EndPoint))
-                        {
-                            p2pMember = member;
-                            break;
-                        }
-
-                        if (FilterTag.Create(member.HostId, _owner.HostId) == message.FilterTag)
-                        {
-                            p2pMember = member;
-                            break;
-                        }
-                    }
+                var p2pMember = _owner.P2PGroup?.FindMember(_owner.HostId, message.EndPoint, message.FilterTag);
 
                 if (p2pMember != null)
                 {
@@ -93,10 +70,9 @@ namespace Nexum.Client
                 return;
             }
 
-            var netMessage = new NetMessage(assembledPacket.Packet.AssembledData,
-                assembledPacket.Packet.AssembledData.Length);
+            var assembledMessage = new NetMessage(assembledPacket.Packet.AssembledData, true);
 
-            NetClientHandler.ReadFrame(_owner, netMessage, message.FilterTag, message.EndPoint, true);
+            NetClientHandler.ReadFrame(_owner, assembledMessage, message.FilterTag, message.EndPoint, true);
 
             content.Release();
         }

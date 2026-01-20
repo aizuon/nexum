@@ -66,9 +66,9 @@
             "args": [
                 "test",
                 "${workspaceFolder}/Nexum.Tests/Nexum.Tests.csproj",
+                "--no-build",
                 "--filter",
                 "FullyQualifiedName!~Integration",
-                "--no-build",
                 "--",
                 "xUnit.ReporterSwitch=verbose"
             ],
@@ -93,9 +93,9 @@
             "args": [
                 "test",
                 "${workspaceFolder}/Nexum.Tests/Nexum.Tests.csproj",
+                "--no-build",
                 "--filter",
                 "FullyQualifiedName~Integration",
-                "--no-build",
                 "--",
                 "xUnit.ReporterSwitch=verbose"
             ],
@@ -111,16 +111,42 @@
             }
         },
         {
+            "label": "Run Integration Tests (Release)",
+            "type": "shell",
+            "command": "dotnet",
+            "args": [
+                "test",
+                "${workspaceFolder}/Nexum.Tests/Nexum.Tests.csproj",
+                "--configuration",
+                "Release",
+                "--no-build",
+                "--filter",
+                "FullyQualifiedName~Integration",
+                "--",
+                "xUnit.ReporterSwitch=verbose"
+            ],
+            "group": "test",
+            "problemMatcher": "$msCompile",
+            "dependsOn": "Build Solution (Release)",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": true,
+                "panel": "shared",
+                "showReuseMessage": false
+            }
+        },
+        {
             "label": "Run All Tests (Coverage)",
             "type": "shell",
             "command": "dotnet",
             "args": [
                 "test",
                 "${workspaceFolder}/Nexum.Tests/Nexum.Tests.csproj",
+                "--no-build",
                 "--collect:XPlat Code Coverage",
                 "--results-directory",
                 "${workspaceFolder}/Nexum.Tests/TestResults",
-                "--no-build",
                 "--",
                 "xUnit.ReporterSwitch=verbose"
             ],

@@ -114,13 +114,13 @@ namespace Nexum.Tests.Integration
                 serverToClientReceived.Set();
             };
 
-            var clientMsg = new NetMessage();
-            clientMsg.Write(11111);
-            client.RmiToServerUdpIfAvailable(7002, clientMsg, reliable: true);
+            var clientMessage = new NetMessage();
+            clientMessage.Write(11111);
+            client.RmiToServerUdpIfAvailable(7002, clientMessage, reliable: true);
 
-            var serverMsg = new NetMessage();
-            serverMsg.Write(22222);
-            session.RmiToClientUdpIfAvailable(7003, serverMsg, reliable: true);
+            var serverMessage = new NetMessage();
+            serverMessage.Write(22222);
+            session.RmiToClientUdpIfAvailable(7003, serverMessage, reliable: true);
 
             Assert.True(clientToServerReceived.Wait(GetAdjustedTimeout(MessageTimeout)));
             Assert.True(serverToClientReceived.Wait(GetAdjustedTimeout(MessageTimeout)));
@@ -179,9 +179,9 @@ namespace Nexum.Tests.Integration
 
             for (int i = 0; i < expectedCount; i++)
             {
-                var msg = new NetMessage();
-                msg.Write(2000 + i);
-                peer1.RmiToPeer(7004, msg, false, true);
+                var testMessage = new NetMessage();
+                testMessage.Write(2000 + i);
+                peer1.RmiToPeer(7004, testMessage, forceRelay: false, reliable: true);
                 await Task.Delay(200);
             }
 
@@ -233,7 +233,7 @@ namespace Nexum.Tests.Integration
 
             var testMessage = new NetMessage();
             testMessage.Write(55555);
-            peer1.RmiToPeer(7005, testMessage, true, true);
+            peer1.RmiToPeer(7005, testMessage, forceRelay: true, reliable: true);
 
             Assert.True(messageReceived.Wait(GetAdjustedTimeout(MessageTimeout)),
                 $"[{profileName}] Relayed reliable message should be delivered");

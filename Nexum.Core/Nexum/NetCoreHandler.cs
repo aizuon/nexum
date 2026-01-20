@@ -17,11 +17,11 @@ namespace Nexum.Core
                 return false;
 
             byte[] decryptedBuffer = crypt.Decrypt(
-                encryptedPayload.GetBuffer(),
+                encryptedPayload.GetBufferSpan(),
                 (EncryptMode)encryptMode
             );
 
-            var decryptedMessage = new NetMessage(decryptedBuffer, decryptedBuffer.Length);
+            var decryptedMessage = new NetMessage(decryptedBuffer, true);
             readMessageCallback(decryptedMessage);
             return true;
         }
@@ -47,7 +47,7 @@ namespace Nexum.Core
                 return false;
             }
 
-            var decompressedMessage = NetZip.DecompressPacket(new NetMessage(buffer, buffer.Length));
+            var decompressedMessage = NetZip.DecompressPacket(new NetMessage(buffer, true));
             decompressedMessage.Compress = true;
             decompressedMessage.EncryptMode = message.EncryptMode;
 

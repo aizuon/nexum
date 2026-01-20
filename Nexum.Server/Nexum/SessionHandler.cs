@@ -61,7 +61,7 @@ namespace Nexum.Server
             var pubKeyStruct = new RsaPublicKeyStructure(pubKey.Modulus, pubKey.Exponent);
             byte[] encodedKey = pubKeyStruct.GetDerEncoded();
 
-            notifyServerConnectionHint.Write(new ByteArray(encodedKey));
+            notifyServerConnectionHint.Write(new ByteArray(encodedKey, true));
 
             session.NexumToClient(notifyServerConnectionHint);
         }

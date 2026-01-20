@@ -28,7 +28,7 @@ namespace Nexum.Server
 
             var session = context.Channel.GetAttribute(ChannelAttributes.Session).Get();
 
-            var netMessage = new NetMessage(new ByteArray(data, length));
+            var netMessage = new NetMessage(data, length, true);
 
             NetServerHandler.ReadFrame(Owner, session, netMessage);
 

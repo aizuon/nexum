@@ -1,5 +1,4 @@
 using System;
-using System.Linq;
 using System.Net;
 using System.Security.Cryptography;
 using System.Threading.Tasks;
@@ -163,7 +162,7 @@ namespace Nexum.Client
                     if (frame.Type == ReliableUdpFrameType.Data && frame.Data != null)
                         if (ReliableUdpHelper.UnwrapPayload(frame.Data, out byte[] payload))
                         {
-                            var innerMessage = new NetMessage(new ByteArray(payload));
+                            var innerMessage = new NetMessage(payload, true);
                             ReadMessage(client, innerMessage, filterTag, udpEndPoint);
                         }
                 }
@@ -195,19 +194,19 @@ namespace Nexum.Client
             while (stream.Length > 0)
             {
                 byte[] streamData = stream.PeekAll();
-                var tempMsg = new NetMessage(new ByteArray(streamData));
+                var tempMsg = new NetMessage(streamData, true);
 
                 if (!tempMsg.Read(out ushort magic) || magic != Constants.TcpSplitter)
                     break;
 
-                var payload = new ByteArray();
-                if (!tempMsg.Read(ref payload))
+                var streamPayload = new ByteArray();
+                if (!tempMsg.Read(ref streamPayload))
                     break;
 
                 int consumedBytes = tempMsg.ReadOffset;
                 stream.PopFront(consumedBytes);
 
-                var innerMessage = new NetMessage(payload);
+                var innerMessage = new NetMessage(streamPayload);
                 ReadMessage(client, innerMessage, filterTag, udpEndPoint);
             }
         }
@@ -223,19 +222,19 @@ namespace Nexum.Client
             while (stream.Length > 0)
             {
                 byte[] streamData = stream.PeekAll();
-                var tempMsg = new NetMessage(new ByteArray(streamData));
+                var tempMsg = new NetMessage(streamData, true);
 
                 if (!tempMsg.Read(out ushort magic) || magic != Constants.TcpSplitter)
                     break;
 
-                var payload = new ByteArray();
-                if (!tempMsg.Read(ref payload))
+                var streamPayload = new ByteArray();
+                if (!tempMsg.Read(ref streamPayload))
                     break;
 
                 int consumedBytes = tempMsg.ReadOffset;
                 stream.PopFront(consumedBytes);
 
-                var innerMessage = new NetMessage(payload);
+                var innerMessage = new NetMessage(streamPayload);
                 ReadMessage(client, innerMessage, filterTag, udpEndPoint);
             }
         }
@@ -356,7 +355,7 @@ namespace Nexum.Client
                 magicNumber = client.UdpMagicNumber;
             }
 
-            foreach (uint hostId in client.PendingP2PConnections.Keys.ToArray())
+            foreach (uint hostId in client.PendingP2PConnections.Keys)
             {
                 if (!client.PendingP2PConnections.TryRemove(hostId, out _))
                     continue;
@@ -737,8 +736,9 @@ namespace Nexum.Client
                     || !message.Read(out int bindPort))
                     return;
 
-                ProcessP2PGroupMemberJoin(client, groupHostId, memberId, eventId, peerUdpMagicNumber,
-                    p2pFirstFrameNumber, enableDirectP2P, bindPort, "P2PGroup_MemberJoin");
+                ProcessP2PGroupMemberJoin(client, groupHostId, memberId, eventId, p2pFirstFrameNumber,
+                    peerUdpMagicNumber,
+                    enableDirectP2P, bindPort, "P2PGroup_MemberJoin", sessionKey, fastSessionKey);
             }
             else
             {
@@ -749,13 +749,15 @@ namespace Nexum.Client
                     || !message.Read(out int bindPort))
                     return;
 
-                ProcessP2PGroupMemberJoin(client, groupHostId, memberId, eventId, peerUdpMagicNumber,
-                    p2pFirstFrameNumber, enableDirectP2P, bindPort, "P2PGroup_MemberJoin_Unencrypted");
+                ProcessP2PGroupMemberJoin(client, groupHostId, memberId, eventId, p2pFirstFrameNumber,
+                    peerUdpMagicNumber,
+                    enableDirectP2P, bindPort, "P2PGroup_MemberJoin_Unencrypted");
             }
         }
 
         private static void ProcessP2PGroupMemberJoin(NetClient client, uint groupHostId, uint memberId, uint eventId,
-            Guid peerUdpMagicNumber, uint p2pFirstFrameNumber, bool enableDirectP2P, int bindPort, string logName)
+            uint p2pFirstFrameNumber, Guid peerUdpMagicNumber, bool enableDirectP2P, int bindPort, string logName,
+            ByteArray sessionKey = null, ByteArray fastSessionKey = null)
         {
             client.Logger.Information(
                 "{LogName} => memberId = {MemberId}, groupHostId = {GroupHostId}, eventId = {EventId}, enableDirectP2P = {EnableDirectP2P}, bindPort = {BindPort}",
@@ -777,8 +779,14 @@ namespace Nexum.Client
                     EnableDirectP2P = enableDirectP2P,
                     PeerBindPort = bindPort
                 };
+                if (sessionKey != null && fastSessionKey != null)
+                {
+                    newMember.PeerCrypt = new NetCrypt(sessionKey.GetBuffer());
+                    newMember.PeerCrypt.InitializeFastEncryption(fastSessionKey.GetBuffer());
+                }
 
                 newMember.InitializeReliableUdp(client.P2PFirstFrameNumber, p2pFirstFrameNumber);
+
                 newMember.UdpDefragBoard.MaxMessageLength =
                     client.NetSettings?.MessageMaxLength ?? NetConfig.MessageMaxLength;
 
@@ -933,9 +941,9 @@ namespace Nexum.Client
                     if (client.UdpChannel != null)
                     {
                         client.Logger.Debug("S2C_RequestCreateUdpSocket => UDP socket already exists, sending ack");
-                        var ack = new NetMessage();
-                        ack.Write(true);
-                        client.RmiToServer((ushort)NexumOpCode.C2S_CreateUdpSocketAck, ack);
+                        var createUdpSocketAck = new NetMessage();
+                        createUdpSocketAck.Write(true);
+                        client.RmiToServer((ushort)NexumOpCode.C2S_CreateUdpSocketAck, createUdpSocketAck);
                         return;
                     }
 
@@ -945,9 +953,9 @@ namespace Nexum.Client
                         {
                             if (client.UdpChannel != null)
                             {
-                                var ack = new NetMessage();
-                                ack.Write(true);
-                                client.RmiToServer((ushort)NexumOpCode.C2S_CreateUdpSocketAck, ack);
+                                var existingSocketAck = new NetMessage();
+                                existingSocketAck.Write(true);
+                                client.RmiToServer((ushort)NexumOpCode.C2S_CreateUdpSocketAck, existingSocketAck);
                                 return;
                             }
 
@@ -956,10 +964,10 @@ namespace Nexum.Client
                             client.UdpEventLoopGroup = workerGroup;
                             client.ServerUdpReadyWaiting = false;
 
-                            var ackMsg = new NetMessage();
-                            ackMsg.Write(true);
+                            var newSocketAck = new NetMessage();
+                            newSocketAck.Write(true);
 
-                            client.RmiToServer((ushort)NexumOpCode.C2S_CreateUdpSocketAck, ackMsg);
+                            client.RmiToServer((ushort)NexumOpCode.C2S_CreateUdpSocketAck, newSocketAck);
                         }
                         catch (Exception ex)
                         {
@@ -1029,10 +1037,10 @@ namespace Nexum.Client
 
                     client.Logger.Debug("P2PRecycleComplete => hostId = {HostId}", hostId);
 
-                    var notify = new NetMessage();
-                    notify.Write(hostId);
+                    var notifyJitDirectP2PTriggered = new NetMessage();
+                    notifyJitDirectP2PTriggered.Write(hostId);
 
-                    client.RmiToServer((ushort)NexumOpCode.NotifyJitDirectP2PTriggered, notify);
+                    client.RmiToServer((ushort)NexumOpCode.NotifyJitDirectP2PTriggered, notifyJitDirectP2PTriggered);
                     break;
                 }
 
@@ -1079,12 +1087,12 @@ namespace Nexum.Client
                         targetMember.P2PHolepunchInitiated = true;
                     }
 
-                    var msg = new NetMessage();
-                    msg.WriteEnum(MessageType.PeerUdp_ServerHolepunch);
-                    msg.Write(magicNumber);
-                    msg.Write(hostId);
+                    var peerUdpServerHolepunch = new NetMessage();
+                    peerUdpServerHolepunch.WriteEnum(MessageType.PeerUdp_ServerHolepunch);
+                    peerUdpServerHolepunch.Write(magicNumber);
+                    peerUdpServerHolepunch.Write(hostId);
 
-                    client.NexumToServerUdpIfAvailable(msg, true);
+                    client.NexumToServerUdpIfAvailable(peerUdpServerHolepunch, true);
                     uint capturedHostId = hostId;
                     var capturedMember = targetMember;
                     HolepunchHelper.SendBurstMessagesWithCheck(
@@ -1274,9 +1282,10 @@ namespace Nexum.Client
                                 }
                             }
 
-                            var notify = new NetMessage();
-                            notify.Write(hostId);
-                            client.RmiToServer((ushort)NexumOpCode.NotifyJitDirectP2PTriggered, notify);
+                            var notifyJitDirectP2PTriggered = new NetMessage();
+                            notifyJitDirectP2PTriggered.Write(hostId);
+                            client.RmiToServer((ushort)NexumOpCode.NotifyJitDirectP2PTriggered,
+                                notifyJitDirectP2PTriggered);
                         });
                     }
 
@@ -1306,13 +1315,14 @@ namespace Nexum.Client
                     {
                         p2pMember.PeerFrameRateInternal = peerFrameRate;
 
-                        var pongMsg = new NetMessage();
-                        pongMsg.Write(clientLocalTime);
-                        pongMsg.Write(client.GetAbsoluteTime());
-                        pongMsg.Write(client.ServerUdpRecentPing);
-                        pongMsg.Write(client.RecentFrameRate);
+                        var reportServerTimeAndFrameRatePong = new NetMessage();
+                        reportServerTimeAndFrameRatePong.Write(clientLocalTime);
+                        reportServerTimeAndFrameRatePong.Write(client.GetAbsoluteTime());
+                        reportServerTimeAndFrameRatePong.Write(client.ServerUdpRecentPing);
+                        reportServerTimeAndFrameRatePong.Write(client.RecentFrameRate);
 
-                        p2pMember.RmiToPeer((ushort)NexumOpCode.ReportServerTimeAndFrameRateAndPong, pongMsg,
+                        p2pMember.RmiToPeer((ushort)NexumOpCode.ReportServerTimeAndFrameRateAndPong,
+                            reportServerTimeAndFrameRatePong,
                             reliable: true);
                     }
 
@@ -1415,12 +1425,13 @@ namespace Nexum.Client
                 client.RSA = new RSACryptoServiceProvider(2048);
                 client.RSA.ImportParameters(rsaParameters);
 
-                var response = new NetMessage();
-                response.WriteEnum(MessageType.NotifyCSEncryptedSessionKey);
-                response.Write(new ByteArray(client.RSA.Encrypt(client.Crypt.GetKey(), true)));
-                response.Write(new ByteArray(client.Crypt.EncryptKey(client.Crypt.GetFastKey())));
+                var notifyCSEncryptedSessionKey = new NetMessage();
+                notifyCSEncryptedSessionKey.WriteEnum(MessageType.NotifyCSEncryptedSessionKey);
+                notifyCSEncryptedSessionKey.Write(new ByteArray(client.RSA.Encrypt(client.Crypt.GetKey(), true), true));
+                notifyCSEncryptedSessionKey.Write(new ByteArray(client.Crypt.EncryptKey(client.Crypt.GetFastKey()),
+                    true));
 
-                client.NexumToServer(response);
+                client.NexumToServer(notifyCSEncryptedSessionKey);
             }
         }
 
@@ -1428,41 +1439,41 @@ namespace Nexum.Client
         {
             client.Logger.Debug("NotifyCSSessionKeySuccess");
 
-            var message = new NetMessage();
-            message.WriteEnum(MessageType.NotifyServerConnectionRequestData);
-            message.Write(new ByteArray());
+            var notifyServerConnectionRequestData = new NetMessage();
+            notifyServerConnectionRequestData.WriteEnum(MessageType.NotifyServerConnectionRequestData);
+            notifyServerConnectionRequestData.Write(new ByteArray());
 
             switch (client.ServerType)
             {
                 case ServerType.Auth:
-                    message.Write(new Guid("{9be73c0b-3b10-403e-be7d-9f222702a38c}"));
+                    notifyServerConnectionRequestData.Write(new Guid("{9be73c0b-3b10-403e-be7d-9f222702a38c}"));
                     break;
 
                 case ServerType.Game:
-                    message.Write(new Guid("{beb92241-8333-4117-ab92-9b4af78c688f}"));
+                    notifyServerConnectionRequestData.Write(new Guid("{beb92241-8333-4117-ab92-9b4af78c688f}"));
                     break;
 
                 case ServerType.Chat:
-                    message.Write(new Guid("{97d36acf-8cc0-4dfb-bcc9-97cab255e2bc}"));
+                    notifyServerConnectionRequestData.Write(new Guid("{97d36acf-8cc0-4dfb-bcc9-97cab255e2bc}"));
                     break;
 
                 case ServerType.Relay:
-                    message.Write(new Guid("{a43a97d1-9ec7-495e-ad5f-8fe45fde1151}"));
+                    notifyServerConnectionRequestData.Write(new Guid("{a43a97d1-9ec7-495e-ad5f-8fe45fde1151}"));
                     break;
             }
 
-            message.Write(Constants.NetVersion);
-            client.NexumToServer(message);
+            notifyServerConnectionRequestData.Write(Constants.NetVersion);
+            client.NexumToServer(notifyServerConnectionRequestData);
         }
 
         private static void NotifyServerConnectSuccessHandler(NetClient client, NetMessage message)
         {
-            var payload = new ByteArray();
+            var connectionPayload = new ByteArray();
             var serverEndPoint = new IPEndPoint(IPAddress.Any, 0);
 
             if (!message.Read(out uint hostId)
                 || !message.Read(out Guid serverGuid)
-                || !message.Read(ref payload)
+                || !message.Read(ref connectionPayload)
                 || !message.ReadIPEndPoint(ref serverEndPoint))
                 return;
 
@@ -1493,12 +1504,12 @@ namespace Nexum.Client
             if (!message.Read(out uint hostId))
                 return;
 
-            var packet = new ByteArray();
-            if (!message.Read(ref packet))
+            var relayedPacket = new ByteArray();
+            if (!message.Read(ref relayedPacket))
                 return;
 
-            var netMessage = new NetMessage(packet) { RelayFrom = hostId };
-            ReadMessage(client, netMessage);
+            var relayedMessage = new NetMessage(relayedPacket) { RelayFrom = hostId };
+            ReadMessage(client, relayedMessage);
         }
 
         private static void ReliableRelay2Handler(NetClient client, NetMessage message)
@@ -1509,15 +1520,15 @@ namespace Nexum.Client
             if (!message.Read(out uint _))
                 return;
 
-            var packet = new ByteArray();
-            if (!message.Read(ref packet))
+            var relayedPacket = new ByteArray();
+            if (!message.Read(ref relayedPacket))
                 return;
 
-            if (!ReliableUdpHelper.UnwrapPayload(packet.GetBuffer(), out byte[] unwrappedData))
+            if (!ReliableUdpHelper.UnwrapPayload(relayedPacket.GetBuffer(), out byte[] unwrappedData))
                 return;
 
-            var netMessage = new NetMessage(new ByteArray(unwrappedData)) { RelayFrom = hostId };
-            ReadMessage(client, netMessage);
+            var relayedMessage = new NetMessage(unwrappedData, true) { RelayFrom = hostId };
+            ReadMessage(client, relayedMessage);
         }
 
         private static void UnreliablePongHandler(NetClient client, NetMessage message)

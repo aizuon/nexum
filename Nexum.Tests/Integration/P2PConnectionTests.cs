@@ -26,11 +26,15 @@ namespace Nexum.Tests.Integration
                 new object[] { "PoorMobile" }
             };
 
-        public static IEnumerable<object[]> NatProfiles =>
+        public static IEnumerable<object[]> AllNetworkProfiles =>
             new List<object[]>
             {
-                new object[] { "PortRestrictedNat" },
-                new object[] { "SymmetricNat" }
+                new object[] { "Ideal", true },
+                new object[] { "HomeWifi", true },
+                new object[] { "Mobile4G", true },
+                new object[] { "PoorMobile", true },
+                new object[] { "PortRestrictedNat", false },
+                new object[] { "SymmetricNat", false }
             };
 
         private async Task<(NetClient client1, NetClient client2, P2PGroup group)>
@@ -135,13 +139,13 @@ namespace Nexum.Tests.Integration
             var peer1 = client1.P2PGroup.P2PMembers[client2.HostId];
             var peer2 = client2.P2PGroup.P2PMembers[client1.HostId];
 
-            var msg1 = new NetMessage();
-            msg1.Write(111);
-            peer1.RmiToPeer(7001, msg1, true, true);
+            var peerMessage1 = new NetMessage();
+            peerMessage1.Write(111);
+            peer1.RmiToPeer(7001, peerMessage1, forceRelay: true, reliable: true);
 
-            var msg2 = new NetMessage();
-            msg2.Write(222);
-            peer2.RmiToPeer(7002, msg2, true, true);
+            var peerMessage2 = new NetMessage();
+            peerMessage2.Write(222);
+            peer2.RmiToPeer(7002, peerMessage2, forceRelay: true, reliable: true);
 
             Assert.True(client2Done.Wait(GetAdjustedTimeout(ConnectionTimeout)),
                 $"[{profileName}] Client2 should receive relayed message");
@@ -154,68 +158,19 @@ namespace Nexum.Tests.Integration
         }
 
         [Theory(Timeout = 180000)]
-        [MemberData(nameof(NetworkProfiles))]
-        public async Task P2PMessaging_Direct_MessagesDelivered(string profileName)
+        [MemberData(nameof(AllNetworkProfiles))]
+        public async Task P2PMessaging_MessagesDelivered(string profileName, bool expectDirectP2P)
         {
             var profile = NetworkProfile.GetByName(profileName);
             SetupNetworkSimulation(profile);
 
-            var (client1, client2, _) = await SetupTwoClientsInP2PGroupAsync(true);
+            var (client1, client2, _) = await SetupTwoClientsInP2PGroupAsync(expectDirectP2P);
 
-            var peer1 = client1.P2PGroup.P2PMembers[client2.HostId];
-            var peer2 = client2.P2PGroup.P2PMembers[client1.HostId];
-
-            Assert.True(peer1.DirectP2P, "Peer1 should have direct P2P connection");
-            Assert.True(peer2.DirectP2P, "Peer2 should have direct P2P connection");
-
-            int client1Received = 0;
-            int client2Received = 0;
-            var client1Done = new ManualResetEventSlim(false);
-            var client2Done = new ManualResetEventSlim(false);
-
-            client1.OnRMIReceive += (msg, _) =>
-            {
-                msg.Read(out client1Received);
-                client1Done.Set();
-            };
-
-            client2.OnRMIReceive += (msg, _) =>
-            {
-                msg.Read(out client2Received);
-                client2Done.Set();
-            };
-
-            var msg1 = new NetMessage();
-            msg1.Write(333);
-            peer1.RmiToPeer(7003, msg1, reliable: true);
-
-            var msg2 = new NetMessage();
-            msg2.Write(444);
-            peer2.RmiToPeer(7004, msg2, reliable: true);
-
-            Assert.True(client2Done.Wait(GetAdjustedTimeout(ConnectionTimeout)),
-                $"[{profileName}] Client2 should receive direct P2P message");
-            Assert.True(client1Done.Wait(GetAdjustedTimeout(ConnectionTimeout)),
-                $"[{profileName}] Client1 should receive direct P2P message");
-            Assert.Equal(333, client2Received);
-            Assert.Equal(444, client1Received);
-
-            LogSimulationStatistics();
-        }
-
-        [Theory(Timeout = 120000)]
-        [MemberData(nameof(NatProfiles))]
-        public async Task P2PConnection_WithNat_StillCommunicates(string profileName)
-        {
-            var profile = NetworkProfile.GetByName(profileName);
-            SetupNetworkSimulation(profile);
-
-            var (client1, client2, _) = await SetupTwoClientsInP2PGroupAsync();
-
-            await WaitForConditionAsync(
-                () => client1.P2PGroup?.P2PMembers.ContainsKey(client2.HostId) == true &&
-                      client2.P2PGroup?.P2PMembers.ContainsKey(client1.HostId) == true,
-                GetAdjustedTimeout(MessageTimeout));
+            if (!expectDirectP2P)
+                await WaitForConditionAsync(
+                    () => client1.P2PGroup?.P2PMembers.ContainsKey(client2.HostId) == true &&
+                          client2.P2PGroup?.P2PMembers.ContainsKey(client1.HostId) == true,
+                    GetAdjustedTimeout(MessageTimeout));
 
             Assert.True(client1.P2PGroup.P2PMembers.ContainsKey(client2.HostId),
                 $"[{profileName}] Client1 should see client2 as P2P peer");
@@ -225,6 +180,12 @@ namespace Nexum.Tests.Integration
             var peer1 = client1.P2PGroup.P2PMembers[client2.HostId];
             var peer2 = client2.P2PGroup.P2PMembers[client1.HostId];
 
+            if (expectDirectP2P)
+            {
+                Assert.True(peer1.DirectP2P, "Peer1 should have direct P2P connection");
+                Assert.True(peer2.DirectP2P, "Peer2 should have direct P2P connection");
+            }
+
             int client1Received = 0;
             int client2Received = 0;
             var client1Done = new ManualResetEventSlim(false);
@@ -242,20 +203,20 @@ namespace Nexum.Tests.Integration
                 client2Done.Set();
             };
 
-            var msg1 = new NetMessage();
-            msg1.Write(555);
-            peer1.RmiToPeer(7010, msg1, true, true);
+            var peerMessage1 = new NetMessage();
+            peerMessage1.Write(333);
+            peer1.RmiToPeer(7003, peerMessage1, reliable: true);
 
-            var msg2 = new NetMessage();
-            msg2.Write(666);
-            peer2.RmiToPeer(7011, msg2, true, true);
+            var peerMessage2 = new NetMessage();
+            peerMessage2.Write(444);
+            peer2.RmiToPeer(7004, peerMessage2, reliable: true);
 
             Assert.True(client2Done.Wait(GetAdjustedTimeout(ConnectionTimeout)),
-                $"[{profileName}] Client2 should receive P2P message (possibly relayed)");
+                $"[{profileName}] Client2 should receive P2P message");
             Assert.True(client1Done.Wait(GetAdjustedTimeout(ConnectionTimeout)),
-                $"[{profileName}] Client1 should receive P2P message (possibly relayed)");
-            Assert.Equal(555, client2Received);
-            Assert.Equal(666, client1Received);
+                $"[{profileName}] Client1 should receive P2P message");
+            Assert.Equal(333, client2Received);
+            Assert.Equal(444, client1Received);
 
             Output.WriteLine($"[{profileName}] P2P communication successful. " +
                              $"Peer1 DirectP2P: {peer1.DirectP2P}, Peer2 DirectP2P: {peer2.DirectP2P}");

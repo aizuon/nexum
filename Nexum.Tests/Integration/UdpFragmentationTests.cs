@@ -48,9 +48,9 @@ namespace Nexum.Tests.Integration
 
             Server.OnRMIReceive += (_, msg, _) =>
             {
-                var byteArray = new ByteArray();
-                msg.Read(ref byteArray);
-                receivedData = byteArray.GetBuffer();
+                var receivedPayload = new ByteArray();
+                msg.Read(ref receivedPayload);
+                receivedData = receivedPayload.GetBuffer();
                 messageReceived.Set();
             };
 
@@ -93,17 +93,17 @@ namespace Nexum.Tests.Integration
 
             Server.OnRMIReceive += (_, msg, _) =>
             {
-                var byteArray = new ByteArray();
-                msg.Read(ref byteArray);
-                serverReceivedData = byteArray.GetBuffer();
+                var receivedPayload = new ByteArray();
+                msg.Read(ref receivedPayload);
+                serverReceivedData = receivedPayload.GetBuffer();
                 serverReceived.Set();
             };
 
             client.OnRMIReceive += (msg, _) =>
             {
-                var byteArray = new ByteArray();
-                msg.Read(ref byteArray);
-                clientReceivedData = byteArray.GetBuffer();
+                var receivedPayload = new ByteArray();
+                msg.Read(ref receivedPayload);
+                clientReceivedData = receivedPayload.GetBuffer();
                 clientReceived.Set();
             };
 
@@ -112,13 +112,13 @@ namespace Nexum.Tests.Integration
             Random.Shared.NextBytes(clientPayload);
             Random.Shared.NextBytes(serverPayload);
 
-            var clientMsg = new NetMessage();
-            clientMsg.Write(new ByteArray(clientPayload));
-            client.RmiToServerUdpIfAvailable(7002, clientMsg, reliable: true);
+            var clientMessage = new NetMessage();
+            clientMessage.Write(new ByteArray(clientPayload));
+            client.RmiToServerUdpIfAvailable(7002, clientMessage, reliable: true);
 
-            var serverMsg = new NetMessage();
-            serverMsg.Write(new ByteArray(serverPayload));
-            session.RmiToClientUdpIfAvailable(7003, serverMsg, reliable: true);
+            var serverMessage = new NetMessage();
+            serverMessage.Write(new ByteArray(serverPayload));
+            session.RmiToClientUdpIfAvailable(7003, serverMessage, reliable: true);
 
             Assert.True(serverReceived.Wait(GetAdjustedTimeout(MessageTimeout)),
                 $"[{profileName}] Server should receive fragmented message");
@@ -170,9 +170,9 @@ namespace Nexum.Tests.Integration
 
             client2.OnRMIReceive += (msg, _) =>
             {
-                var byteArray = new ByteArray();
-                msg.Read(ref byteArray);
-                receivedData = byteArray.GetBuffer();
+                var receivedPayload = new ByteArray();
+                msg.Read(ref receivedPayload);
+                receivedData = receivedPayload.GetBuffer();
                 messageReceived.Set();
             };
 
@@ -181,7 +181,7 @@ namespace Nexum.Tests.Integration
 
             var testMessage = new NetMessage();
             testMessage.Write(new ByteArray(largePayload));
-            peer1.RmiToPeer(7004, testMessage, false, true);
+            peer1.RmiToPeer(7004, testMessage, forceRelay: false, reliable: true);
 
             Assert.True(messageReceived.Wait(GetAdjustedTimeout(LongOperationTimeout)),
                 $"[{profileName}] P2P direct fragmented message should be received");
@@ -225,9 +225,9 @@ namespace Nexum.Tests.Integration
 
             client2.OnRMIReceive += (msg, _) =>
             {
-                var byteArray = new ByteArray();
-                msg.Read(ref byteArray);
-                receivedData = byteArray.GetBuffer();
+                var receivedPayload = new ByteArray();
+                msg.Read(ref receivedPayload);
+                receivedData = receivedPayload.GetBuffer();
                 messageReceived.Set();
             };
 
@@ -236,7 +236,7 @@ namespace Nexum.Tests.Integration
 
             var testMessage = new NetMessage();
             testMessage.Write(new ByteArray(largePayload));
-            peer1.RmiToPeer(7005, testMessage, true, true);
+            peer1.RmiToPeer(7005, testMessage, forceRelay: true, reliable: true);
 
             Assert.True(messageReceived.Wait(GetAdjustedTimeout(MessageTimeout)),
                 $"[{profileName}] P2P relayed fragmented message should be received");

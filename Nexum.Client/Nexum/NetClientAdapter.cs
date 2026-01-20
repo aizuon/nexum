@@ -47,9 +47,9 @@ namespace Nexum.Client
             byte[] data = GC.AllocateUninitializedArray<byte>(readableBytes);
             buffer.GetBytes(buffer.ReaderIndex, data, 0, readableBytes);
 
-            var netMessage = new NetMessage(data, readableBytes);
+            var receivedMessage = new NetMessage(data, readableBytes, true);
 
-            NetClientHandler.ReadFrame(_owner, netMessage);
+            NetClientHandler.ReadFrame(_owner, receivedMessage);
 
             buffer.Release();
         }

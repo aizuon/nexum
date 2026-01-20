@@ -96,7 +96,7 @@ namespace Nexum.Core
         {
             var msg = new NetMessage();
             msg.Write(Constants.TcpSplitter);
-            msg.Write(new ByteArray(payload, payload.Length));
+            msg.Write(new ByteArray(payload, true));
             return msg.GetBuffer();
         }
 
@@ -104,18 +104,18 @@ namespace Nexum.Core
         {
             payload = null;
 
-            var msg = new NetMessage(wrappedData, wrappedData.Length);
+            var msg = new NetMessage(wrappedData, true);
             if (!msg.Read(out ushort magic))
                 return false;
 
             if (magic != Constants.TcpSplitter)
                 return false;
 
-            var data = new ByteArray();
-            if (!msg.Read(ref data))
+            var unwrappedPayload = new ByteArray();
+            if (!msg.Read(ref unwrappedPayload))
                 return false;
 
-            payload = data.GetBuffer();
+            payload = unwrappedPayload.GetBuffer();
             return true;
         }
     }

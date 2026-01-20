@@ -15,21 +15,32 @@ namespace Nexum.Core
         public ByteArray(ByteArray data)
         {
             _buffer = data._buffer;
+            WriteOffset = data.WriteOffset;
+            ReadOffset = data.ReadOffset;
         }
 
-        public ByteArray(byte[] data)
+        public ByteArray(byte[] data, bool useExternalBuffer = false)
         {
-            _buffer = data.FastClone();
+            _buffer = useExternalBuffer ? data : data.FastClone();
             WriteOffset = _buffer.Length;
         }
 
-        public ByteArray(byte[] data, int length)
+        public ByteArray(byte[] data, int length, bool useExternalBuffer = false)
         {
-            _buffer = GC.AllocateUninitializedArray<byte>(length);
-            Buffer.BlockCopy(data, 0, _buffer, 0, length);
+            if (useExternalBuffer && data.Length == length)
+            {
+                _buffer = data;
+            }
+            else
+            {
+                _buffer = GC.AllocateUninitializedArray<byte>(length);
+                Buffer.BlockCopy(data, 0, _buffer, 0, length);
+            }
+
+            WriteOffset = length;
         }
 
-        public int Length => _buffer.Length;
+        public int Length => WriteOffset > 0 ? WriteOffset : _buffer.Length;
 
         public int ReadOffset { get; set; }
 
@@ -38,15 +49,16 @@ namespace Nexum.Core
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public byte[] GetBuffer()
         {
-            byte[] result = GC.AllocateUninitializedArray<byte>(_buffer.Length);
-            Buffer.BlockCopy(_buffer, 0, result, 0, _buffer.Length);
+            int length = Length;
+            byte[] result = GC.AllocateUninitializedArray<byte>(length);
+            Buffer.BlockCopy(_buffer, 0, result, 0, length);
             return result;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public ReadOnlySpan<byte> GetBufferSpan()
         {
-            return _buffer.AsSpan(0, WriteOffset > 0 ? WriteOffset : _buffer.Length);
+            return _buffer.AsSpan(0, Length);
         }
 
         public virtual void Shrink()
@@ -238,8 +250,9 @@ namespace Nexum.Core
 
         public void Write(ByteArray obj)
         {
-            WriteScalar(obj.Length);
-            Write(obj._buffer);
+            int length = obj.Length;
+            WriteScalar(length);
+            Write(obj._buffer.AsSpan(0, length));
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -265,7 +278,7 @@ namespace Nexum.Core
                 byte[] data = GC.AllocateUninitializedArray<byte>((int)length);
                 if (Read(ref data, data.Length))
                 {
-                    obj = new ByteArray(data, data.Length);
+                    obj = new ByteArray(data, data.Length, true);
                     return true;
                 }
             }
@@ -278,7 +291,7 @@ namespace Nexum.Core
             byte[] data = GC.AllocateUninitializedArray<byte>(length);
             if (!Read(ref data, length))
                 return false;
-            obj = new ByteArray(data, length);
+            obj = new ByteArray(data, length, true);
             return true;
         }
 

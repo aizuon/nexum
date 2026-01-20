@@ -45,8 +45,8 @@ namespace Nexum.Server
                     p2pGroupMemberJoin.Write(session.HostId);
                     p2pGroupMemberJoin.Write(new ByteArray());
                     p2pGroupMemberJoin.Write(0);
-                    p2pGroupMemberJoin.Write(new ByteArray(crypt.GetKey()));
-                    p2pGroupMemberJoin.Write(new ByteArray(crypt.GetFastKey()));
+                    p2pGroupMemberJoin.Write(new ByteArray(crypt.GetKey(), true));
+                    p2pGroupMemberJoin.Write(new ByteArray(crypt.GetFastKey(), true));
                     p2pGroupMemberJoin.Write(memberToJoin.P2PFirstFrameNumber);
                     p2pGroupMemberJoin.Write(memberToJoin.ConnectionMagicNumber);
                     p2pGroupMemberJoin.Write(Server.AllowDirectP2P);
@@ -90,8 +90,8 @@ namespace Nexum.Server
                         p2pGroupMemberJoin1.Write(session.HostId);
                         p2pGroupMemberJoin1.Write(new ByteArray());
                         p2pGroupMemberJoin1.Write(stateB.EventId);
-                        p2pGroupMemberJoin1.Write(new ByteArray(crypt.GetKey()));
-                        p2pGroupMemberJoin1.Write(new ByteArray(crypt.GetFastKey()));
+                        p2pGroupMemberJoin1.Write(new ByteArray(crypt.GetKey(), true));
+                        p2pGroupMemberJoin1.Write(new ByteArray(crypt.GetFastKey(), true));
                         p2pGroupMemberJoin1.Write(memberToJoin.P2PFirstFrameNumber);
                         p2pGroupMemberJoin1.Write(memberToJoin.ConnectionMagicNumber);
                         p2pGroupMemberJoin1.Write(Server.AllowDirectP2P);
@@ -104,8 +104,8 @@ namespace Nexum.Server
                         p2pGroupMemberJoin2.Write(member.Session.HostId);
                         p2pGroupMemberJoin2.Write(new ByteArray());
                         p2pGroupMemberJoin2.Write(stateA.EventId);
-                        p2pGroupMemberJoin2.Write(new ByteArray(crypt.GetKey()));
-                        p2pGroupMemberJoin2.Write(new ByteArray(crypt.GetFastKey()));
+                        p2pGroupMemberJoin2.Write(new ByteArray(crypt.GetKey(), true));
+                        p2pGroupMemberJoin2.Write(new ByteArray(crypt.GetFastKey(), true));
                         p2pGroupMemberJoin2.Write(member.P2PFirstFrameNumber);
                         p2pGroupMemberJoin2.Write(member.ConnectionMagicNumber);
                         p2pGroupMemberJoin2.Write(Server.AllowDirectP2P);

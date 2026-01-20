@@ -90,6 +90,7 @@ namespace Nexum.Tests
             byte[] compressedData;
             compressed.ReadBytes(out compressedData, (int)compressedSize);
             var compressedMessage = new NetMessage(compressedData, (int)compressedSize);
+
             var decompressed = NetZip.DecompressPacket(compressedMessage);
             Assert.Equal(originalSize, decompressed.Length);
             Assert.Equal(original.Buffer, decompressed.Buffer);
@@ -140,8 +141,8 @@ namespace Nexum.Tests
             byte[] data = new byte[10000];
             for (int i = 0; i < data.Length; i++)
                 data[i] = (byte)(i % 10);
-
             original.Write(data);
+
             var compressed = NetZip.CompressPacket(original);
             var messageType = MessageType.None;
             compressed.Read(ref messageType);

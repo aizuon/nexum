@@ -76,21 +76,6 @@ namespace Nexum.Tests
         }
 
         [Fact]
-        public void EncryptDecrypt_WithLength_RoundTrip()
-        {
-            using var crypt = new NetCrypt(NetCrypt.DefaultKeyLength, NetCrypt.DefaultFastKeyLength);
-            byte[] original = new byte[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 };
-            int length = 5;
-
-            byte[] encrypted = crypt.Encrypt(original, length, EncryptMode.Secure);
-            byte[] decrypted = crypt.Decrypt(encrypted, encrypted.Length, EncryptMode.Secure);
-
-            Assert.Equal(length, decrypted.Length);
-            for (int i = 0; i < length; i++)
-                Assert.Equal(original[i], decrypted[i]);
-        }
-
-        [Fact]
         public void Encrypt_SecureMode_ProducesDifferentOutput()
         {
             using var crypt = new NetCrypt(NetCrypt.DefaultKeyLength, NetCrypt.DefaultFastKeyLength);

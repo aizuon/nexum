@@ -17,7 +17,7 @@ namespace Nexum.Core
         public NetMessage(NetMessage message)
         {
             EncryptMode = message.EncryptMode;
-            Write(message.Buffer);
+            Write(message.GetBufferSpan());
         }
 
         public NetMessage(ByteArray packet)
@@ -25,8 +25,13 @@ namespace Nexum.Core
         {
         }
 
-        public NetMessage(byte[] data, int length)
-            : base(data, length)
+        public NetMessage(byte[] data, bool useExternalBuffer = false)
+            : base(data, useExternalBuffer)
+        {
+        }
+
+        public NetMessage(byte[] data, int length, bool useExternalBuffer = false)
+            : base(data, length, useExternalBuffer)
         {
         }
 
@@ -51,7 +56,7 @@ namespace Nexum.Core
 
         public void Write(NetMessage obj)
         {
-            Write(obj.Buffer);
+            Write(obj.GetBufferSpan());
             Compress = obj.Compress;
             EncryptMode = obj.EncryptMode;
         }

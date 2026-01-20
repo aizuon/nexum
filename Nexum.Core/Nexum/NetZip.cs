@@ -13,23 +13,23 @@ namespace Nexum.Core
 
         public static NetMessage CompressPacket(NetMessage message)
         {
-            var netMessage = new NetMessage
+            var compressedMessage = new NetMessage
             {
                 EncryptMode = message.EncryptMode
             };
             using (var mem = new MemoryStream())
             using (var zlib = new ZLibStream(mem, CompressionLevel.Optimal))
             {
-                zlib.Write(message.GetBuffer(), 0, message.Length);
+                zlib.Write(message.GetBufferSpan());
                 zlib.Close();
                 byte[] array = mem.ToArray();
-                netMessage.WriteEnum(MessageType.Compressed);
-                netMessage.WriteScalar(array.Length);
-                netMessage.WriteScalar(message.Length);
-                netMessage.Write(array);
+                compressedMessage.WriteEnum(MessageType.Compressed);
+                compressedMessage.WriteScalar(array.Length);
+                compressedMessage.WriteScalar(message.Length);
+                compressedMessage.Write(array);
             }
 
-            return netMessage;
+            return compressedMessage;
         }
 
         public static byte[] CompressData(byte[] data)
@@ -45,7 +45,7 @@ namespace Nexum.Core
 
         public static NetMessage DecompressPacket(NetMessage message)
         {
-            var netMessage = new NetMessage();
+            var decompressedMessage = new NetMessage();
             try
             {
                 byte[] inputBuffer = message.GetBuffer();
@@ -65,7 +65,7 @@ namespace Nexum.Core
                         ArrayPool<byte>.Shared.Return(buffer);
                     }
 
-                    netMessage.Write(outputStream.ToArray());
+                    decompressedMessage.Write(outputStream.ToArray());
                 }
             }
             catch (Exception e)
@@ -73,7 +73,7 @@ namespace Nexum.Core
                 Logger.Error(e, "Failed to decompress packet of length {Length}", message.Length);
             }
 
-            return netMessage;
+            return decompressedMessage;
         }
     }
 }

@@ -87,13 +87,13 @@ namespace Nexum.Tests.Integration
                 }
             };
 
-            var msg1 = new NetMessage();
-            msg1.Write(111);
-            client.RmiToServer(5001, msg1);
+            var secureMessage = new NetMessage();
+            secureMessage.Write(111);
+            client.RmiToServer(5001, secureMessage);
 
-            var msg2 = new NetMessage();
-            msg2.Write(222);
-            client.RmiToServer(5002, msg2, EncryptMode.Fast);
+            var fastMessage = new NetMessage();
+            fastMessage.Write(222);
+            client.RmiToServer(5002, fastMessage, EncryptMode.Fast);
 
             Assert.True(allReceived.Wait(MessageTimeout), "All encrypted messages should be received");
             Assert.Equal(111, secureReceived);
