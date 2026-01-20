@@ -215,16 +215,26 @@ namespace Nexum.Tests.E2E.Orchestration
             var timeout = DateTime.UtcNow.AddMinutes(5);
             while (DateTime.UtcNow < timeout)
             {
-                var response = await _ec2Client.DescribeInstancesAsync(new DescribeInstancesRequest
+                try
                 {
-                    InstanceIds = [instanceId]
-                });
+                    var response = await _ec2Client.DescribeInstancesAsync(new DescribeInstancesRequest
+                    {
+                        InstanceIds = [instanceId]
+                    });
 
-                var instance = response.Reservations[0].Instances[0];
-                if (instance.State.Name == targetState)
+                    if (response.Reservations.Count > 0 && response.Reservations[0].Instances.Count > 0)
+                    {
+                        var instance = response.Reservations[0].Instances[0];
+                        if (instance.State.Name == targetState)
+                        {
+                            _logger.Information("Instance {InstanceId} is now {State}", instanceId, targetState);
+                            return;
+                        }
+                    }
+                }
+                catch (AmazonEC2Exception ex) when (ex.ErrorCode == "InvalidInstanceID.NotFound")
                 {
-                    _logger.Information("Instance {InstanceId} is now {State}", instanceId, targetState);
-                    return;
+                    _logger.Debug("Instance {InstanceId} not yet visible, retrying...", instanceId);
                 }
 
                 await Task.Delay(TimeSpan.FromSeconds(5));

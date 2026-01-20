@@ -78,8 +78,8 @@ jobs:
           path: ./TestResults/*.trx
           retention-days: 7
 
-      - name: Cleanup AWS Resources (on failure)
-        if: failure()
+      - name: Cleanup AWS Resources
+        if: always()
         run: |
           INSTANCE_IDS=$(aws ec2 describe-instances \
             --filters "Name=tag:nexum-e2e,Values=true" "Name=instance-state-name,Values=pending,running,stopping,stopped" \
