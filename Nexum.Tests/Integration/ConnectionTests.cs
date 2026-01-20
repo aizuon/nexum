@@ -71,13 +71,13 @@ namespace Nexum.Tests.Integration
             var clientDone = new ManualResetEventSlim(false);
             const int expectedMessages = 5;
 
-            client.OnRMIReceive += (message, rmiId) =>
+            client.OnRMIReceive += (_, _) =>
             {
                 if (Interlocked.Increment(ref clientReceived) >= expectedMessages)
                     clientDone.Set();
             };
 
-            Server.OnRMIReceive += (session, message, rmiId) =>
+            Server.OnRMIReceive += (_, _, _) =>
             {
                 if (Interlocked.Increment(ref serverReceived) >= expectedMessages)
                     serverDone.Set();

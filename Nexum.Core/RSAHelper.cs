@@ -2,7 +2,7 @@ using System;
 using System.Security.Cryptography;
 using Org.BouncyCastle.Asn1;
 
-namespace NexumCore
+namespace Nexum.Core
 {
     internal static class RSAHelper
     {

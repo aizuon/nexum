@@ -549,7 +549,7 @@ namespace Nexum.Tests
             var byteArray = new ByteArray();
             byteArray.Write(new byte[] { 1, 2, 3 });
 
-            bool success = byteArray.ReadBytes(out byte[] result, 10);
+            bool success = byteArray.ReadBytes(out byte[] _, 10);
 
             Assert.False(success, "ReadBytes should fail when requested length exceeds available data");
         }

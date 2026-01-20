@@ -144,82 +144,9 @@ namespace Nexum.Server
 
         public event EventHandler<ConnectionStateChangedEventArgs> ConnectionStateChanged;
 
-        internal void SetConnectionState(ConnectionState newState)
-        {
-            ConnectionState previousState;
-            lock (_stateLock)
-            {
-                if (_connectionState == newState)
-                    return;
-
-                previousState = _connectionState;
-                _connectionState = newState;
-            }
-
-            Logger.Information("Connection state changed: {PreviousState} -> {NewState}", previousState, newState);
-
-            var args = new ConnectionStateChangedEventArgs(previousState, newState);
-            ConnectionStateChanged?.Invoke(this, args);
-
-            Server?.OnSessionConnectionStateChanged(this, previousState, newState);
-        }
-
         public double GetAbsoluteTime()
         {
             return _stopwatch.Elapsed.TotalSeconds;
-        }
-
-        internal void InitializeToClientReliableUdp(uint firstFrameNumber)
-        {
-            if (ToClientReliableUdp != null)
-                return;
-
-            ToClientReliableUdp = new ReliableUdpHost(firstFrameNumber)
-            {
-                GetAbsoluteTime = GetAbsoluteTime,
-                GetRecentPing = () => ClientUdpRecentPing > 0 ? ClientUdpRecentPing : 0.05,
-                SendOneFrameToUdpLayer = SendReliableUdpFrameToClient,
-                IsReliableChannel = () => false
-            };
-
-            ToClientReliableUdp.OnFailed += OnToClientReliableUdpFailed;
-            Logger.Information("Client reliable UDP initialized with firstFrameNumber = {FirstFrameNumber}",
-                firstFrameNumber);
-        }
-
-        private void SendReliableUdpFrameToClient(ReliableUdpFrame frame)
-        {
-            var msg = ReliableUdpHelper.BuildFrameMessage(frame);
-            ToClientUdp(msg);
-        }
-
-        internal void ResetToClientReliableUdp()
-        {
-            if (ToClientReliableUdp != null)
-            {
-                ToClientReliableUdp.OnFailed -= OnToClientReliableUdpFailed;
-                ToClientReliableUdp = null;
-            }
-        }
-
-        private void OnToClientReliableUdpFailed()
-        {
-            Logger.Warning(
-                "ToClientReliableUdp failed after max retries, falling back to TCP - retry will be triggered by server");
-
-            ToClientReliableUdp.OnFailed -= OnToClientReliableUdpFailed;
-            ToClientReliableUdp = null;
-
-            UdpEnabled = false;
-
-            RmiToClient((ushort)NexumOpCode.NotifyUdpToTcpFallbackByServer, new NetMessage());
-        }
-
-        internal void ReliableUdpFrameMove(double elapsedTime)
-        {
-            double currentTime = GetAbsoluteTime();
-            ToClientReliableUdp?.FrameMove(elapsedTime);
-            UdpDefragBoard.PruneStalePackets(currentTime);
         }
 
         public void RmiToClient(ushort rmiId, NetMessage message, EncryptMode ecMode = EncryptMode.Secure)
@@ -253,12 +180,6 @@ namespace Nexum.Server
                 message.Write((ByteArray)data);
                 ToClient(message);
             }
-        }
-
-        private void ToClient(NetMessage message)
-        {
-            var buffer = Unpooled.WrappedBuffer(message.GetBuffer());
-            Channel.WriteAndFlushAsync(buffer);
         }
 
         public void RmiToClientUdpIfAvailable(ushort rmiId, NetMessage message, EncryptMode ecMode = EncryptMode.Fast,
@@ -310,6 +231,66 @@ namespace Nexum.Server
             }
         }
 
+        internal void SetConnectionState(ConnectionState newState)
+        {
+            ConnectionState previousState;
+            lock (_stateLock)
+            {
+                if (_connectionState == newState)
+                    return;
+
+                previousState = _connectionState;
+                _connectionState = newState;
+            }
+
+            Logger.Information("Connection state changed: {PreviousState} -> {NewState}", previousState, newState);
+
+            var args = new ConnectionStateChangedEventArgs(previousState, newState);
+            ConnectionStateChanged?.Invoke(this, args);
+
+            Server?.OnSessionConnectionStateChanged(this, previousState, newState);
+        }
+
+        internal void InitializeToClientReliableUdp(uint firstFrameNumber)
+        {
+            if (ToClientReliableUdp != null)
+                return;
+
+            ToClientReliableUdp = new ReliableUdpHost(firstFrameNumber)
+            {
+                GetAbsoluteTime = GetAbsoluteTime,
+                GetRecentPing = () => ClientUdpRecentPing > 0 ? ClientUdpRecentPing : 0.05,
+                SendOneFrameToUdpLayer = SendReliableUdpFrameToClient,
+                IsReliableChannel = () => false
+            };
+
+            ToClientReliableUdp.OnFailed += OnToClientReliableUdpFailed;
+            Logger.Information("Client reliable UDP initialized with firstFrameNumber = {FirstFrameNumber}",
+                firstFrameNumber);
+        }
+
+        internal void ResetToClientReliableUdp()
+        {
+            if (ToClientReliableUdp != null)
+            {
+                ToClientReliableUdp.OnFailed -= OnToClientReliableUdpFailed;
+                ToClientReliableUdp = null;
+            }
+        }
+
+        internal void ReliableUdpFrameMove(double elapsedTime)
+        {
+            double currentTime = GetAbsoluteTime();
+            ToClientReliableUdp?.FrameMove(elapsedTime);
+            UdpDefragBoard.PruneStalePackets(currentTime);
+        }
+
+        private void ToClient(NetMessage message)
+        {
+            var buffer = Unpooled.WrappedBuffer(message.GetBuffer());
+            Channel.WriteAndFlushAsync(buffer);
+        }
+
         private void ToClientUdp(NetMessage message)
         {
             var channel = UdpSocket?.Channel;
@@ -326,6 +307,28 @@ namespace Nexum.Server
                 udpMessage.EndPoint = UdpEndPoint;
                 channel.WriteAndFlushAsync(udpMessage);
             }
+        }
+
+        private void SendReliableUdpFrameToClient(ReliableUdpFrame frame)
+        {
+            lock (SendLock)
+            {
+                var msg = ReliableUdpHelper.BuildFrameMessage(frame);
+                ToClientUdp(msg);
+            }
+        }
+
+        private void OnToClientReliableUdpFailed()
+        {
+            Logger.Warning(
+                "ToClientReliableUdp failed after max retries, falling back to TCP - retry will be triggered by server");
+
+            ToClientReliableUdp.OnFailed -= OnToClientReliableUdpFailed;
+            ToClientReliableUdp = null;
+
+            UdpEnabled = false;
+
+            RmiToClient((ushort)NexumOpCode.NotifyUdpToTcpFallbackByServer, new NetMessage());
         }
     }
 }

@@ -12,7 +12,7 @@ using DotNetty.Transport.Bootstrapping;
 using DotNetty.Transport.Channels;
 using DotNetty.Transport.Channels.Sockets;
 using Nexum.Core;
-using NexumCore.DotNetty.Codecs;
+using Nexum.Core.DotNetty.Codecs;
 using Org.BouncyCastle.Asn1.X509;
 using Org.BouncyCastle.Security;
 using Serilog;
@@ -44,16 +44,17 @@ namespace Nexum.Server
         private ThreadLoop _reliableUdpLoop;
         private UdpSocket[] _udpSocketsCache;
 
-        public OnRMIReceiveDelegate OnRMIReceive = (session, message, rmiId) => { };
+        public OnRMIReceiveDelegate OnRMIReceive = (_, _, _) => { };
 
-        public OnSessionConnectedDelegate OnSessionConnected = session => { };
+        public OnSessionConnectedDelegate OnSessionConnected = _ => { };
 
+        public OnSessionConnectingDelegate OnSessionConnecting = _ => { };
 
-        public OnSessionConnectingDelegate OnSessionConnecting = session => { };
+        public OnSessionDisconnectedDelegate OnSessionDisconnected = _ => { };
 
-        public OnSessionDisconnectedDelegate OnSessionDisconnected = session => { };
+        public OnSessionHandshakingDelegate OnSessionHandshaking = _ => { };
 
-        public OnSessionHandshakingDelegate OnSessionHandshaking = session => { };
+        internal Guid ServerGuid = Guid.NewGuid();
 
         public NetServer(ServerType serverType, NetSettings netSettings = null,
             bool allowDirectP2P = true)
@@ -98,8 +99,6 @@ namespace Nexum.Server
         {
             LocalHostId = (uint)HostId.Server
         };
-
-        internal Guid ServerGuid { get; } = new Guid("4DF3B4FA-0729-4459-9674-19EFEF5DF825");
 
         internal IPAddress IPAddress { get; set; }
 
@@ -180,6 +179,199 @@ namespace Nexum.Server
             return Convert.ToBase64String(ExportRsaPublicKey());
         }
 
+        public P2PGroup CreateP2PGroup()
+        {
+            var group = new P2PGroup(this);
+            P2PGroupsInternal.TryAdd(group.HostId, group);
+            return group;
+        }
+
+        public async Task ListenAsync(IPEndPoint endPoint, uint[] udpListenerPorts = null)
+        {
+            EventLoopGroup = new MultithreadEventLoopGroup();
+
+            IPAddress = endPoint.Address;
+
+            Channel = await new ServerBootstrap()
+                .Group(EventLoopGroup)
+                .Channel<TcpServerSocketChannel>()
+                .Handler(new ActionChannelInitializer<IServerSocketChannel>(_ => { }))
+                .ChildHandler(new ActionChannelInitializer<ISocketChannel>(ch =>
+                {
+                    ch.Pipeline.AddLast(new SessionHandler(this));
+                    if (NetSettings.IdleTimeout > 0)
+                        ch.Pipeline.AddLast(new IdleStateHandler(0, 0, (int)NetSettings.IdleTimeout));
+                    ch.Pipeline.AddLast(new NexumFrameDecoder((int)NetSettings.MessageMaxLength));
+                    ch.Pipeline.AddLast(new NexumFrameEncoder());
+                    ch.Pipeline.AddLast(new NetServerAdapter(this));
+                }))
+                .ChildOption(ChannelOption.TcpNodelay, !NetConfig.EnableNagleAlgorithm)
+                .ChildOption(ChannelOption.SoRcvbuf, NetConfig.TcpIssueRecvLength)
+                .ChildOption(ChannelOption.SoSndbuf, NetConfig.TcpSendBufferLength)
+                .ChildOption(ChannelOption.AllowHalfClosure, false)
+                .ChildAttribute(ChannelAttributes.Session, default(NetSession))
+                .BindAsync(endPoint);
+
+            if (udpListenerPorts != null)
+            {
+                foreach (uint port in udpListenerPorts)
+                {
+                    UdpSockets.TryAdd(port,
+                        new UdpSocket(this, ((IPEndPoint)Channel.LocalAddress).Address.MapToIPv4(), port));
+                    Logger.Debug("UDP listener started on port {UdpPort}", port);
+                }
+
+                lock (_udpSocketsCacheLock)
+                {
+                    _udpSocketsCache = UdpSockets.Values.ToArray();
+                }
+            }
+
+            RetryUdpOrHolepunchIfRequired(this, null);
+
+            Logger.Information("Listening on {Endpoint}", endPoint.ToIPv4String());
+
+            Logger.Information(
+                "Server started: DirectP2P={AllowDirectP2P}, UDP ports={UdpPortCount}, Encryption={EncryptionKeyLength}bit",
+                AllowDirectP2P,
+                udpListenerPorts?.Length ?? 0,
+                NetSettings.EncryptedMessageKeyLength);
+        }
+
+        public override void Dispose()
+        {
+            Logger.Information("Shutting down {ServerType} server with {SessionCount} active sessions",
+                ServerType, SessionsInternal.Count);
+
+            _reliableUdpLoop?.Stop();
+            _reliableUdpLoop = null;
+
+            foreach (var soc in UdpSockets.Values)
+                soc.Close();
+            UdpSockets.Clear();
+
+            foreach (var session in SessionsInternal.Values)
+                session.Channel?.CloseAsync();
+            SessionsInternal.Clear();
+            MagicNumberSessions.Clear();
+            UdpSessions.Clear();
+
+            Channel?.CloseAsync();
+            Channel = null;
+            EventLoopGroup?.ShutdownGracefullyAsync(TimeSpan.Zero, TimeSpan.Zero);
+            EventLoopGroup = null;
+
+            base.Dispose();
+        }
+
+        internal void OnSessionConnectionStateChanged(NetSession session, ConnectionState previousState,
+            ConnectionState newState)
+        {
+            var args = new SessionConnectionStateChangedEventArgs(session.HostId, previousState, newState);
+            SessionConnectionStateChanged?.Invoke(this, args);
+
+            switch (newState)
+            {
+                case ConnectionState.Connecting:
+                    OnSessionConnecting(session);
+                    break;
+                case ConnectionState.Handshaking:
+                    OnSessionHandshaking(session);
+                    break;
+                case ConnectionState.Connected:
+                    OnSessionConnected(session);
+                    break;
+                case ConnectionState.Disconnected:
+                    OnSessionDisconnected(session);
+                    break;
+            }
+        }
+
+        internal void StartReliableUdpLoop()
+        {
+            if (_reliableUdpLoop != null)
+                return;
+
+            _reliableUdpLoop = new ThreadLoop(
+                TimeSpan.FromMilliseconds(ReliableUdpConfig.FrameMoveInterval * 1000),
+                ReliableUdpFrameMove);
+            _reliableUdpLoop.Start();
+        }
+
+        internal void InitiateUdpSetup(NetSession session)
+        {
+            if (!UdpEnabled)
+                return;
+
+            if (session.UdpEnabled)
+                return;
+
+            if (session.UdpSocket != null)
+                return;
+
+            Logger.Information("Initiating UDP setup for hostId = {HostId}", session.HostId);
+
+            SendUdpSocketRequest(session);
+        }
+
+        internal UdpSocket GetRandomUdpSocket()
+        {
+            lock (_udpSocketsCacheLock)
+            {
+                if (_udpSocketsCache == null || _udpSocketsCache.Length != UdpSockets.Count)
+                    _udpSocketsCache = UdpSockets.Values.ToArray();
+                int socketIndex = Random.Shared.Next(_udpSocketsCache.Length);
+                return _udpSocketsCache[socketIndex];
+            }
+        }
+
+        internal void InitiateP2PConnections(NetSession session)
+        {
+            if (!AllowDirectP2P)
+                return;
+
+            if (!session.UdpEnabled)
+                return;
+
+            if (session.P2PGroup == null)
+                return;
+
+            if (!session.P2PGroup.P2PMembersInternal.TryGetValue(session.HostId, out var member))
+                return;
+
+            foreach (var stateToTarget in member.ConnectionStates.Values)
+            {
+                stateToTarget.RemotePeer.ConnectionStates.TryGetValue(session.HostId, out var stateFromTarget);
+
+                if (stateFromTarget == null)
+                    continue;
+
+                if (!stateToTarget.IsJoined || !stateFromTarget.IsJoined)
+                    continue;
+                if (!stateFromTarget.RemotePeer.Session.UdpEnabled)
+                    continue;
+
+                bool shouldInitialize;
+                lock (stateToTarget.StateLock)
+                {
+                    shouldInitialize = !stateToTarget.IsInitialized;
+                }
+
+                if (!shouldInitialize)
+                    continue;
+
+                Logger.Debug("Initiating immediate P2P connection between {HostId} and {TargetHostId}",
+                    session.HostId, stateToTarget.RemotePeer.Session.HostId);
+
+                InitializeP2PConnection(session, stateToTarget, stateFromTarget);
+            }
+        }
+
+        internal Task ScheduleAsync(Action<object, object> action, object context, object state, TimeSpan delay)
+        {
+            return EventLoopGroup.ScheduleAsync(action, context, state, delay);
+        }
+
         private static NetSettings CreateNetSettings(NetSettings provided)
         {
             var settings = new NetSettings
@@ -241,78 +433,6 @@ namespace Nexum.Server
             return settings;
         }
 
-        internal void OnSessionConnectionStateChanged(NetSession session, ConnectionState previousState,
-            ConnectionState newState)
-        {
-            var args = new SessionConnectionStateChangedEventArgs(session.HostId, previousState, newState);
-            SessionConnectionStateChanged?.Invoke(this, args);
-
-            switch (newState)
-            {
-                case ConnectionState.Connecting:
-                    OnSessionConnecting(session);
-                    break;
-                case ConnectionState.Handshaking:
-                    OnSessionHandshaking(session);
-                    break;
-                case ConnectionState.Connected:
-                    OnSessionConnected(session);
-                    break;
-                case ConnectionState.Disconnected:
-                    OnSessionDisconnected(session);
-                    break;
-            }
-        }
-
-        public P2PGroup CreateP2PGroup()
-        {
-            var group = new P2PGroup(this);
-            P2PGroupsInternal.TryAdd(group.HostId, group);
-            return group;
-        }
-
-        public override void Dispose()
-        {
-            Logger.Information("Shutting down {ServerType} server with {SessionCount} active sessions",
-                ServerType, SessionsInternal.Count);
-
-            StopReliableUdpLoop();
-
-            foreach (var soc in UdpSockets.Values)
-                soc.Close();
-            UdpSockets.Clear();
-
-            foreach (var session in SessionsInternal.Values)
-                session.Channel?.CloseAsync();
-            SessionsInternal.Clear();
-            MagicNumberSessions.Clear();
-            UdpSessions.Clear();
-
-            Channel?.CloseAsync();
-            Channel = null;
-            EventLoopGroup?.ShutdownGracefullyAsync(TimeSpan.Zero, TimeSpan.Zero);
-            EventLoopGroup = null;
-
-            base.Dispose();
-        }
-
-        internal void StartReliableUdpLoop()
-        {
-            if (_reliableUdpLoop != null)
-                return;
-
-            _reliableUdpLoop = new ThreadLoop(
-                TimeSpan.FromMilliseconds(ReliableUdpConfig.FrameMoveInterval * 1000),
-                ReliableUdpFrameMove);
-            _reliableUdpLoop.Start();
-        }
-
-        private void StopReliableUdpLoop()
-        {
-            _reliableUdpLoop?.Stop();
-            _reliableUdpLoop = null;
-        }
-
         private void ReliableUdpFrameMove(TimeSpan delta)
         {
             double elapsedTime = delta.TotalSeconds;
@@ -320,58 +440,6 @@ namespace Nexum.Server
             foreach (var session in SessionsInternal.Values)
                 if (!session.IsDisposed)
                     session.ReliableUdpFrameMove(elapsedTime);
-        }
-
-        public async Task ListenAsync(IPEndPoint endPoint, uint[] udpListenerPorts = null)
-        {
-            EventLoopGroup = new MultithreadEventLoopGroup();
-
-            IPAddress = endPoint.Address;
-
-            Channel = await new ServerBootstrap()
-                .Group(EventLoopGroup)
-                .Channel<TcpServerSocketChannel>()
-                .Handler(new ActionChannelInitializer<IServerSocketChannel>(_ => { }))
-                .ChildHandler(new ActionChannelInitializer<ISocketChannel>(ch =>
-                {
-                    ch.Pipeline.AddLast(new SessionHandler(this));
-                    if (NetSettings.IdleTimeout > 0)
-                        ch.Pipeline.AddLast(new IdleStateHandler(0, 0, (int)NetSettings.IdleTimeout));
-                    ch.Pipeline.AddLast(new NexumFrameDecoder((int)NetSettings.MessageMaxLength));
-                    ch.Pipeline.AddLast(new NexumFrameEncoder());
-                    ch.Pipeline.AddLast(new NetServerAdapter(this));
-                }))
-                .ChildOption(ChannelOption.TcpNodelay, !NetConfig.EnableNagleAlgorithm)
-                .ChildOption(ChannelOption.SoRcvbuf, NetConfig.TcpIssueRecvLength)
-                .ChildOption(ChannelOption.SoSndbuf, NetConfig.TcpSendBufferLength)
-                .ChildOption(ChannelOption.AllowHalfClosure, false)
-                .ChildAttribute(ChannelAttributes.Session, default(NetSession))
-                .BindAsync(endPoint);
-
-            if (udpListenerPorts != null)
-            {
-                foreach (uint port in udpListenerPorts)
-                {
-                    UdpSockets.TryAdd(port,
-                        new UdpSocket(this, ((IPEndPoint)Channel.LocalAddress).Address.MapToIPv4(), port));
-                    Logger.Debug("UDP listener started on port {UdpPort}", port);
-                }
-
-                lock (_udpSocketsCacheLock)
-                {
-                    _udpSocketsCache = UdpSockets.Values.ToArray();
-                }
-            }
-
-            RetryUdpOrHolepunchIfRequired(this, null);
-
-            Logger.Information("Listening on {Endpoint}", endPoint.ToIPv4String());
-
-            Logger.Information(
-                "Server started: DirectP2P={AllowDirectP2P}, UDP ports={UdpPortCount}, Encryption={EncryptionKeyLength}bit",
-                AllowDirectP2P,
-                udpListenerPorts?.Length ?? 0,
-                NetSettings.EncryptedMessageKeyLength);
         }
 
         private static void RetryUdpOrHolepunchIfRequired(object context, object _)
@@ -470,11 +538,11 @@ namespace Nexum.Server
                     if (isInitialized && shouldRetry)
                     {
                         session.Logger.Debug(
-                            "Trying to reconnect P2P to {TargetHostId} {retryCount}/{maxCount}",
+                            "Trying to reconnect P2P to {TargetHostId} {RetryCount}/{MaxCount}",
                             stateToTarget.RemotePeer.Session.HostId, stateToTarget.RetryCount, HolepunchConfig
                                 .MaxRetryAttempts);
                         stateFromTarget.RemotePeer.Session.Logger.Debug(
-                            "Trying to reconnect P2P to {TargetHostId} {retryCount}/{maxCount}",
+                            "Trying to reconnect P2P to {TargetHostId} {RetryCount}/{MaxCount}",
                             session.HostId, stateFromTarget.RetryCount, HolepunchConfig.MaxRetryAttempts);
 
                         SendRenewP2PConnectionState(session, stateToTarget.RemotePeer.Session.HostId);
@@ -496,33 +564,6 @@ namespace Nexum.Server
                 TimeSpan.FromMilliseconds(HolepunchConfig.RetryIntervalMs));
         }
 
-        internal void InitiateUdpSetup(NetSession session)
-        {
-            if (!UdpEnabled)
-                return;
-
-            if (session.UdpEnabled)
-                return;
-
-            if (session.UdpSocket != null)
-                return;
-
-            Logger.Information("Initiating UDP setup for hostId = {HostId}", session.HostId);
-
-            SendUdpSocketRequest(session);
-        }
-
-        internal UdpSocket GetRandomUdpSocket()
-        {
-            lock (_udpSocketsCacheLock)
-            {
-                if (_udpSocketsCache == null || _udpSocketsCache.Length != UdpSockets.Count)
-                    _udpSocketsCache = UdpSockets.Values.ToArray();
-                int socketIndex = Random.Shared.Next(_udpSocketsCache.Length);
-                return _udpSocketsCache[socketIndex];
-            }
-        }
-
         private void SendUdpSocketRequest(NetSession session)
         {
             session.LastUdpSetupAttempt = DateTimeOffset.Now;
@@ -538,48 +579,6 @@ namespace Nexum.Server
                 ((IPEndPoint)socket.Channel.LocalAddress).Port));
 
             session.RmiToClient((ushort)NexumOpCode.S2C_RequestCreateUdpSocket, message);
-        }
-
-        internal void InitiateP2PConnections(NetSession session)
-        {
-            if (!AllowDirectP2P)
-                return;
-
-            if (!session.UdpEnabled)
-                return;
-
-            if (session.P2PGroup == null)
-                return;
-
-            if (!session.P2PGroup.P2PMembersInternal.TryGetValue(session.HostId, out var member))
-                return;
-
-            foreach (var stateToTarget in member.ConnectionStates.Values)
-            {
-                stateToTarget.RemotePeer.ConnectionStates.TryGetValue(session.HostId, out var stateFromTarget);
-
-                if (stateFromTarget == null)
-                    continue;
-
-                if (!stateToTarget.IsJoined || !stateFromTarget.IsJoined)
-                    continue;
-                if (!stateFromTarget.RemotePeer.Session.UdpEnabled)
-                    continue;
-
-                bool shouldInitialize;
-                lock (stateToTarget.StateLock)
-                {
-                    shouldInitialize = !stateToTarget.IsInitialized;
-                }
-
-                if (!shouldInitialize)
-                    continue;
-
-                Logger.Debug("Initiating immediate P2P connection between {HostId} and {TargetHostId}",
-                    session.HostId, stateToTarget.RemotePeer.Session.HostId);
-
-                InitializeP2PConnection(session, stateToTarget, stateFromTarget);
-            }
         }
 
         private static void InitializeP2PConnection(NetSession session, P2PConnectionState stateToTarget,
@@ -625,11 +624,6 @@ namespace Nexum.Server
             var message = new NetMessage();
             message.Write(targetHostId);
             session.RmiToClient((ushort)NexumOpCode.RenewP2PConnectionState, message);
-        }
-
-        internal Task ScheduleAsync(Action<object, object> action, object context, object state, TimeSpan delay)
-        {
-            return EventLoopGroup.ScheduleAsync(action, context, state, delay);
         }
     }
 }

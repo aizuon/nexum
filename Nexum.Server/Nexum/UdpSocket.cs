@@ -4,7 +4,7 @@ using DotNetty.Transport.Bootstrapping;
 using DotNetty.Transport.Channels;
 using DotNetty.Transport.Channels.Sockets;
 using Nexum.Core;
-using NexumCore.DotNetty.Codecs;
+using Nexum.Core.DotNetty.Codecs;
 using Serilog;
 using Constants = Serilog.Core.Constants;
 

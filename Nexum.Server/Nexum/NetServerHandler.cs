@@ -1,5 +1,6 @@
 using System;
 using System.Buffers;
+using System.Collections.Generic;
 using System.Net;
 using BaseLib.Extensions;
 using Nexum.Core;
@@ -257,38 +258,33 @@ namespace Nexum.Server
             if (destinationCount <= 0 || destinationCount > 1024)
                 return;
 
-            uint[] destinationHostIds = ArrayPool<uint>.Shared.Rent((int)destinationCount);
-            try
+            var destinations = new Dictionary<uint, uint>();
+            for (int i = 0; i < destinationCount; i++)
             {
-                for (int i = 0; i < destinationCount; i++)
+                if (!message.Read(out uint hostId) || !message.Read(out uint frameNumber))
+                    return;
+
+                destinations[hostId] = frameNumber;
+            }
+
+            var relayPayload = new ByteArray();
+            if (!message.Read(ref relayPayload))
+                return;
+
+            var group = session.P2PGroup;
+            if (group == null)
+                return;
+
+            foreach ((uint hostId, uint frameNumber) in destinations)
+                if (group.P2PMembersInternal.TryGetValue(hostId, out var p2pMember))
                 {
-                    if (!message.Read(out uint hostId) || !message.Read(out uint frameNumber))
-                        return;
-
-                    destinationHostIds[i] = hostId;
+                    var reliableRelay2 = new NetMessage();
+                    reliableRelay2.WriteEnum(MessageType.ReliableRelay2);
+                    reliableRelay2.Write(session.HostId);
+                    reliableRelay2.Write(frameNumber);
+                    reliableRelay2.Write(relayPayload);
+                    p2pMember.Session.NexumToClient(reliableRelay2);
                 }
-
-                var relayPayload = new ByteArray();
-                if (!message.Read(ref relayPayload))
-                    return;
-
-                var reliableRelay2 = new NetMessage();
-                reliableRelay2.WriteEnum(MessageType.ReliableRelay2);
-                reliableRelay2.Write(session.HostId);
-                reliableRelay2.Write(0);
-                reliableRelay2.Write(relayPayload);
-                var group = session.P2PGroup;
-                if (group == null)
-                    return;
-
-                for (int i = 0; i < destinationCount; i++)
-                    if (group.P2PMembersInternal.TryGetValue(destinationHostIds[i], out var p2pMember))
-                        p2pMember.Session.NexumToClient(reliableRelay2);
-            }
-            finally
-            {
-                ArrayPool<uint>.Shared.Return(destinationHostIds);
-            }
         }
 
         private static void UnreliableRelay1Handler(NetServer server, NetSession session, NetMessage message)

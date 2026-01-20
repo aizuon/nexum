@@ -4,9 +4,8 @@ using BaseLib.Extensions;
 using DotNetty.Codecs;
 using DotNetty.Transport.Channels;
 using DotNetty.Transport.Channels.Sockets;
-using Nexum.Core;
 
-namespace NexumCore.DotNetty.Codecs
+namespace Nexum.Core.DotNetty.Codecs
 {
     internal sealed class UdpFrameEncoder : MessageToMessageEncoder<UdpMessage>
     {

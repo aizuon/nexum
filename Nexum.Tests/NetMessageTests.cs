@@ -308,7 +308,7 @@ namespace Nexum.Tests
             var message = new NetMessage();
             message.Write(new byte[] { 1, 2, 3, 4 });
 
-            bool success = message.Read(out Guid result);
+            bool success = message.Read(out Guid _);
 
             Assert.False(success, "Read should fail with insufficient data for Guid");
         }

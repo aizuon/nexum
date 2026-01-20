@@ -4,7 +4,7 @@ using DotNetty.Buffers;
 using DotNetty.Codecs;
 using DotNetty.Transport.Channels;
 
-namespace NexumCore.DotNetty.Codecs
+namespace Nexum.Core.DotNetty.Codecs
 {
     internal class LengthFieldBasedFrameDecoder : ByteToMessageDecoder
     {

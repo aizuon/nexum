@@ -12,8 +12,8 @@ using DotNetty.Transport.Bootstrapping;
 using DotNetty.Transport.Channels;
 using DotNetty.Transport.Channels.Sockets;
 using Nexum.Core;
+using Nexum.Core.DotNetty.Codecs;
 using Nexum.Core.Simulation;
-using NexumCore.DotNetty.Codecs;
 using Serilog;
 using Constants = Serilog.Core.Constants;
 
@@ -63,12 +63,10 @@ namespace Nexum.Client
         public OnDisconnectedDelegate OnDisconnected = () => { };
 
         public OnHandshakingDelegate OnHandshaking = () => { };
-        public OnRMIReceiveDelegate OnRMIReceive = (message, rmiId) => { };
+        public OnRMIReceiveDelegate OnRMIReceive = (_, _) => { };
 
         internal uint P2PFirstFrameNumber;
         internal Guid PeerUdpMagicNumber;
-
-        internal ThreadLoop PingLoop;
 
         internal double RecentFrameRate;
         internal ThreadLoop ReliablePingLoop;
@@ -80,13 +78,10 @@ namespace Nexum.Client
         internal double ServerTimeDiff;
         internal int ServerUdpFallbackCount;
         internal double ServerUdpJitter;
-
         internal double ServerUdpLastPing;
         internal double ServerUdpLastReceivedTime;
-
         internal bool ServerUdpReadyWaiting;
         internal double ServerUdpRecentPing;
-
         internal IPEndPoint ServerUdpSocket;
         internal bool ServerUdpSocketFailed;
 
@@ -96,8 +91,9 @@ namespace Nexum.Client
         internal UdpPacketDefragBoard UdpDefragBoard;
         internal IEventLoopGroup UdpEventLoopGroup;
         internal UdpPacketFragBoard UdpFragBoard;
-
         internal Guid UdpMagicNumber;
+
+        internal ThreadLoop UnreliablePingLoop;
 
         public NetClient(ServerType serverType)
         {
@@ -172,6 +168,126 @@ namespace Nexum.Client
             Logger.Information("Server public key pinning disabled");
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public double GetAbsoluteTime()
+        {
+            return _stopwatch.Elapsed.TotalSeconds;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public double GetServerTime()
+        {
+            return GetAbsoluteTime() - ServerTimeDiff;
+        }
+
+        public async Task ConnectAsync(IPEndPoint ipEndPoint)
+        {
+            SetConnectionState(ConnectionState.Connecting);
+            Logger.Debug("Connecting to {Endpoint}", ipEndPoint.ToIPv4String());
+            _eventLoopGroup = new MultithreadEventLoopGroup();
+            Channel = await new Bootstrap()
+                .Group(_eventLoopGroup)
+                .Channel<TcpSocketChannel>()
+                .Handler(new ActionChannelInitializer<ISocketChannel>(channel =>
+                {
+                    channel.Pipeline.AddLast(new NexumFrameDecoder(NetConfig.MessageMaxLength));
+                    channel.Pipeline.AddLast(new NexumFrameEncoder());
+                    channel.Pipeline.AddLast(new NetClientAdapter(this));
+                }))
+                .Option(ChannelOption.TcpNodelay, !NetConfig.EnableNagleAlgorithm)
+                .Option(ChannelOption.SoRcvbuf, NetConfig.TcpIssueRecvLength)
+                .Option(ChannelOption.SoSndbuf, NetConfig.TcpSendBufferLength)
+                .Option(ChannelOption.AllowHalfClosure, false)
+                .Option(ChannelOption.Allocator, UnpooledByteBufferAllocator.Default)
+                .ConnectAsync(ipEndPoint);
+
+            Logger.Information("TCP connection established to {Endpoint}", ipEndPoint.ToIPv4String());
+        }
+
+        public void Close()
+        {
+            Logger.Information("Initiating graceful TCP shutdown to {ServerType}", ServerType);
+            var shutdownTcp = new NetMessage();
+
+            shutdownTcp.Write(new ByteArray());
+
+            RmiToServer((ushort)NexumOpCode.ShutdownTcp, shutdownTcp);
+        }
+
+        public void RmiToServer(ushort rmiId, NetMessage message, EncryptMode ecMode = EncryptMode.Secure)
+        {
+            var data = new NetMessage();
+            data.Reliable = true;
+            if (ecMode != EncryptMode.None)
+                data.EncryptMode = ecMode;
+            if (message.Compress)
+                data.Compress = true;
+
+            data.WriteEnum(MessageType.RMI);
+            data.Write(rmiId);
+            data.Write(message);
+            NexumToServer(data);
+        }
+
+        public void RmiToServerUdpIfAvailable(ushort rmiId, NetMessage message, EncryptMode ecMode = EncryptMode.Fast,
+            bool force = false,
+            bool reliable = false)
+        {
+            var data = new NetMessage();
+            data.Reliable = reliable;
+            if (ecMode != EncryptMode.None)
+                data.EncryptMode = ecMode;
+            if (message.Compress)
+                data.Compress = true;
+
+            data.WriteEnum(MessageType.RMI);
+            data.Write(rmiId);
+            data.Write(message);
+
+            NexumToServerUdpIfAvailable(data, force, reliable);
+        }
+
+        public override void Dispose()
+        {
+            Logger.Information("Disposing NetClient for {ServerType}", ServerType);
+
+            SetConnectionState(ConnectionState.Disconnected);
+
+            UnreliablePingLoop?.Stop();
+            UnreliablePingLoop = null;
+            ReliablePingLoop?.Stop();
+            ReliablePingLoop = null;
+            ReliableUdpLoop?.Stop();
+            ReliableUdpLoop = null;
+
+            if (ToServerReliableUdp != null)
+            {
+                ToServerReliableUdp.OnFailed -= OnToServerReliableUdpFailed;
+                ToServerReliableUdp = null;
+            }
+
+            foreach (var member in P2PGroup?.P2PMembers.Values ?? Enumerable.Empty<P2PMember>())
+                member.Close();
+            P2PGroup?.P2PMembers.Clear();
+            P2PGroup = null;
+
+            UdpChannel?.CloseAsync();
+            UdpChannel = null;
+            UdpEventLoopGroup?.ShutdownGracefullyAsync(TimeSpan.Zero, TimeSpan.Zero);
+            UdpEventLoopGroup = null;
+            Channel?.CloseAsync();
+            Channel = null;
+            _eventLoopGroup?.ShutdownGracefullyAsync(TimeSpan.Zero, TimeSpan.Zero);
+            _eventLoopGroup = null;
+
+            Clients.TryRemove(ServerType, out _);
+
+            Crypt?.Dispose();
+            Crypt = null;
+
+            base.Dispose();
+        }
+
         internal bool ValidateServerPublicKey(byte[] serverPublicKey)
         {
             if (PinnedServerPublicKey == null)
@@ -224,30 +340,6 @@ namespace Nexum.Client
             }
         }
 
-        public async Task ConnectAsync(IPEndPoint ipEndPoint)
-        {
-            SetConnectionState(ConnectionState.Connecting);
-            Logger.Debug("Connecting to {Endpoint}", ipEndPoint.ToIPv4String());
-            _eventLoopGroup = new MultithreadEventLoopGroup();
-            Channel = await new Bootstrap()
-                .Group(_eventLoopGroup)
-                .Channel<TcpSocketChannel>()
-                .Handler(new ActionChannelInitializer<ISocketChannel>(channel =>
-                {
-                    channel.Pipeline.AddLast(new NexumFrameDecoder(NetConfig.MessageMaxLength));
-                    channel.Pipeline.AddLast(new NexumFrameEncoder());
-                    channel.Pipeline.AddLast(new NetClientAdapter(this));
-                }))
-                .Option(ChannelOption.TcpNodelay, !NetConfig.EnableNagleAlgorithm)
-                .Option(ChannelOption.SoRcvbuf, NetConfig.TcpIssueRecvLength)
-                .Option(ChannelOption.SoSndbuf, NetConfig.TcpSendBufferLength)
-                .Option(ChannelOption.AllowHalfClosure, false)
-                .Option(ChannelOption.Allocator, UnpooledByteBufferAllocator.Default)
-                .ConnectAsync(ipEndPoint);
-
-            Logger.Information("TCP connection established to {Endpoint}", ipEndPoint.ToIPv4String());
-        }
-
         internal (IChannel Channel, IEventLoopGroup WorkerGroup, int Port, bool PortReuseSuccess) ConnectUdp(
             int? targetPort = null)
         {
@@ -294,16 +386,22 @@ namespace Nexum.Client
             return (channel, workerGroup, port, portReuseSuccess);
         }
 
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public double GetAbsoluteTime()
+        internal void CloseUdp()
         {
-            return _stopwatch.Elapsed.TotalSeconds;
-        }
+            Logger.Information("Closing UDP channel for {ServerType}", ServerType);
+            UdpEnabled = false;
+            SelfUdpSocket = null;
 
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public double GetServerTime()
-        {
-            return GetAbsoluteTime() - ServerTimeDiff;
+            if (ToServerReliableUdp != null)
+            {
+                ToServerReliableUdp.OnFailed -= OnToServerReliableUdpFailed;
+                ToServerReliableUdp = null;
+            }
+
+            UdpChannel?.CloseAsync();
+            UdpChannel = null;
+            UdpEventLoopGroup?.ShutdownGracefullyAsync(TimeSpan.Zero, TimeSpan.Zero);
+            UdpEventLoopGroup = null;
         }
 
         internal void StartReliableUdpLoop()
@@ -333,50 +431,6 @@ namespace Nexum.Client
             ToServerReliableUdp.OnFailed += OnToServerReliableUdpFailed;
             Logger.Information("Server reliable UDP initialized with firstFrameNumber = {FirstFrameNumber}",
                 firstFrameNumber);
-        }
-
-        private void SendReliableUdpFrameToServer(ReliableUdpFrame frame)
-        {
-            var msg = ReliableUdpHelper.BuildFrameMessage(frame);
-            ToServerUdp(msg);
-        }
-
-        private void OnToServerReliableUdpFailed()
-        {
-            Logger.Warning(
-                "ToServerReliableUdp failed after max retries, falling back to TCP and requesting re-holepunch");
-
-            ToServerReliableUdp.OnFailed -= OnToServerReliableUdpFailed;
-            ToServerReliableUdp = null;
-
-            UdpEnabled = false;
-
-            Task.Run(() =>
-            {
-                CloseUdp();
-
-                RmiToServer((ushort)NexumOpCode.C2S_RequestCreateUdpSocket, new NetMessage());
-            });
-        }
-
-        internal void StopReliableUdpLoop()
-        {
-            ReliableUdpLoop?.Stop();
-            ReliableUdpLoop = null;
-        }
-
-        private void ReliableUdpFrameMove(TimeSpan delta)
-        {
-            double elapsedTime = delta.TotalSeconds;
-            double currentTime = GetAbsoluteTime();
-
-            ToServerReliableUdp?.FrameMove(elapsedTime);
-            UdpDefragBoard.PruneStalePackets(currentTime);
-
-            if (P2PGroup != null)
-                foreach (var member in P2PGroup.P2PMembers.Values)
-                    if (!member.IsClosed)
-                        member.FrameMove(elapsedTime);
         }
 
         internal void SendReliablePing()
@@ -414,6 +468,135 @@ namespace Nexum.Client
             }
 
             NexumToServerUdpIfAvailable(unreliablePing, true);
+        }
+
+        internal void NexumToServer(NetMessage data)
+        {
+            lock (SendLock)
+            {
+                if (data.Compress)
+                    data = NetZip.CompressPacket(data);
+                if (data.Encrypt)
+                    data = Crypt.CreateEncryptedMessage(data);
+
+                var message = new NetMessage();
+                message.Write((ByteArray)data);
+                ToServer(message);
+            }
+        }
+
+        internal void NexumToServerUdpIfAvailable(NetMessage data, bool force = false, bool reliable = false)
+        {
+            RequestServerUdpSocketReady_FirstTimeOnly();
+
+            lock (SendLock)
+            {
+                data.Reliable = reliable;
+                if (data.Compress)
+                    data = NetZip.CompressPacket(data);
+                if (data.Encrypt)
+                    data = Crypt.CreateEncryptedMessage(data);
+
+                if ((UdpEnabled || force) && UdpChannel != null && ServerUdpSocket != null)
+                {
+                    if (reliable && ToServerReliableUdp != null)
+                    {
+                        byte[] wrappedData = ReliableUdpHelper.WrapPayload(data.GetBuffer());
+                        ToServerReliableUdp.Send(wrappedData, wrappedData.Length);
+                    }
+                    else
+                    {
+                        ToServerUdp(data);
+                    }
+                }
+                else if (!force)
+                {
+                    NexumToServer(data);
+                }
+            }
+        }
+
+        internal void RequestServerUdpSocketReady_FirstTimeOnly()
+        {
+            if (UdpChannel != null || ServerUdpReadyWaiting || ServerUdpSocketFailed)
+                return;
+
+            ServerUdpReadyWaiting = true;
+            RmiToServer((ushort)NexumOpCode.C2S_RequestCreateUdpSocket, new NetMessage());
+        }
+
+        private void ToServer(NetMessage message)
+        {
+            ToServer(message.GetBuffer());
+        }
+
+        private void ToServer(byte[] data)
+        {
+            var buffer = Unpooled.WrappedBuffer(data);
+            Channel.WriteAndFlushAsync(buffer);
+        }
+
+        private void ToServerUdp(NetMessage message)
+        {
+            ToServerUdp(message.GetBuffer());
+        }
+
+        private void ToServerUdp(byte[] data)
+        {
+            var channel = UdpChannel;
+            if (channel == null || !channel.Active || ServerUdpSocket == null)
+            {
+                Logger.Verbose("UDP Channel not ready, packet dropped");
+                return;
+            }
+
+            foreach (var udpMessage in UdpFragBoard.FragmentPacket(data, HostId,
+                         (uint)Core.HostId.Server))
+            {
+                udpMessage.EndPoint = ServerUdpSocket;
+                channel.WriteAndFlushAsync(udpMessage);
+            }
+        }
+
+        private void SendReliableUdpFrameToServer(ReliableUdpFrame frame)
+        {
+            lock (SendLock)
+            {
+                var msg = ReliableUdpHelper.BuildFrameMessage(frame);
+                ToServerUdp(msg);
+            }
+        }
+
+        private void OnToServerReliableUdpFailed()
+        {
+            Logger.Warning(
+                "ToServerReliableUdp failed after max retries, falling back to TCP and requesting re-holepunch");
+
+            ToServerReliableUdp.OnFailed -= OnToServerReliableUdpFailed;
+            ToServerReliableUdp = null;
+
+            UdpEnabled = false;
+
+            Task.Run(() =>
+            {
+                CloseUdp();
+
+                RmiToServer((ushort)NexumOpCode.C2S_RequestCreateUdpSocket, new NetMessage());
+            });
+        }
+
+        private void ReliableUdpFrameMove(TimeSpan delta)
+        {
+            double elapsedTime = delta.TotalSeconds;
+            double currentTime = GetAbsoluteTime();
+
+            ToServerReliableUdp?.FrameMove(elapsedTime);
+            UdpDefragBoard.PruneStalePackets(currentTime);
+
+            if (P2PGroup != null)
+                foreach (var member in P2PGroup.P2PMembers.Values)
+                    if (!member.IsClosed)
+                        member.FrameMove(elapsedTime);
         }
 
         private void UpdateFrameRate(TimeSpan delta)
@@ -468,192 +651,6 @@ namespace Nexum.Client
                         ReliableUdpConfig.ServerUdpRepunchMaxTrialCount);
                 }
             });
-        }
-
-        public void RmiToServer(ushort rmiId, NetMessage message, EncryptMode ecMode = EncryptMode.Secure)
-        {
-            var data = new NetMessage();
-            data.Reliable = true;
-            if (ecMode != EncryptMode.None)
-                data.EncryptMode = ecMode;
-            if (message.Compress)
-                data.Compress = true;
-
-            data.WriteEnum(MessageType.RMI);
-            data.Write(rmiId);
-            data.Write(message);
-            NexumToServer(data);
-        }
-
-        internal void NexumToServer(NetMessage data)
-        {
-            lock (SendLock)
-            {
-                if (data.Compress)
-                    data = NetZip.CompressPacket(data);
-                if (data.Encrypt)
-                    data = Crypt.CreateEncryptedMessage(data);
-
-                var message = new NetMessage();
-                message.Write((ByteArray)data);
-                ToServer(message);
-            }
-        }
-
-        private void ToServer(NetMessage message)
-        {
-            ToServer(message.GetBuffer());
-        }
-
-        private void ToServer(byte[] data)
-        {
-            var buffer = Unpooled.WrappedBuffer(data);
-            Channel.WriteAndFlushAsync(buffer);
-        }
-
-        public void RmiToServerUdpIfAvailable(ushort rmiId, NetMessage message, EncryptMode ecMode = EncryptMode.Fast,
-            bool force = false,
-            bool reliable = false)
-        {
-            var data = new NetMessage();
-            data.Reliable = reliable;
-            if (ecMode != EncryptMode.None)
-                data.EncryptMode = ecMode;
-            if (message.Compress)
-                data.Compress = true;
-
-            data.WriteEnum(MessageType.RMI);
-            data.Write(rmiId);
-            data.Write(message);
-
-            NexumToServerUdpIfAvailable(data, force, reliable);
-        }
-
-        internal void NexumToServerUdpIfAvailable(NetMessage data, bool force = false, bool reliable = false)
-        {
-            RequestServerUdpSocketReady_FirstTimeOnly();
-
-            lock (SendLock)
-            {
-                data.Reliable = reliable;
-                if (data.Compress)
-                    data = NetZip.CompressPacket(data);
-                if (data.Encrypt)
-                    data = Crypt.CreateEncryptedMessage(data);
-
-                if ((UdpEnabled || force) && UdpChannel != null && ServerUdpSocket != null)
-                {
-                    if (reliable && ToServerReliableUdp != null)
-                    {
-                        byte[] wrappedData = ReliableUdpHelper.WrapPayload(data.GetBuffer());
-                        ToServerReliableUdp.Send(wrappedData, wrappedData.Length);
-                    }
-                    else
-                    {
-                        ToServerUdp(data);
-                    }
-                }
-                else if (!force)
-                {
-                    NexumToServer(data);
-                }
-            }
-        }
-
-        internal void RequestServerUdpSocketReady_FirstTimeOnly()
-        {
-            if (UdpChannel != null || ServerUdpReadyWaiting || ServerUdpSocketFailed)
-                return;
-
-            ServerUdpReadyWaiting = true;
-            RmiToServer((ushort)NexumOpCode.C2S_RequestCreateUdpSocket, new NetMessage());
-        }
-
-        private void ToServerUdp(NetMessage message)
-        {
-            ToServerUdp(message.GetBuffer());
-        }
-
-        private void ToServerUdp(byte[] data)
-        {
-            var channel = UdpChannel;
-            if (channel == null || !channel.Active || ServerUdpSocket == null)
-            {
-                Logger.Verbose("UDP Channel not ready, packet dropped");
-                return;
-            }
-
-            foreach (var udpMessage in UdpFragBoard.FragmentPacket(data, HostId,
-                         (uint)Core.HostId.Server))
-            {
-                udpMessage.EndPoint = ServerUdpSocket;
-                channel.WriteAndFlushAsync(udpMessage);
-            }
-        }
-
-        public void Close()
-        {
-            Logger.Information("Initiating graceful TCP shutdown to {ServerType}", ServerType);
-            var shutdownTcp = new NetMessage();
-
-            shutdownTcp.Write(new ByteArray());
-
-            RmiToServer((ushort)NexumOpCode.ShutdownTcp, shutdownTcp);
-        }
-
-        internal void CloseUdp()
-        {
-            Logger.Information("Closing UDP channel for {ServerType}", ServerType);
-            UdpEnabled = false;
-            SelfUdpSocket = null;
-
-            if (ToServerReliableUdp != null)
-            {
-                ToServerReliableUdp.OnFailed -= OnToServerReliableUdpFailed;
-                ToServerReliableUdp = null;
-            }
-
-            UdpChannel?.CloseAsync();
-            UdpChannel = null;
-            UdpEventLoopGroup?.ShutdownGracefullyAsync(TimeSpan.Zero, TimeSpan.Zero);
-            UdpEventLoopGroup = null;
-        }
-
-        public override void Dispose()
-        {
-            Logger.Information("Disposing NetClient for {ServerType}", ServerType);
-
-            SetConnectionState(ConnectionState.Disconnected);
-
-            PingLoop?.Stop();
-            ReliablePingLoop?.Stop();
-            StopReliableUdpLoop();
-
-            if (ToServerReliableUdp != null)
-            {
-                ToServerReliableUdp.OnFailed -= OnToServerReliableUdpFailed;
-                ToServerReliableUdp = null;
-            }
-
-            foreach (var member in P2PGroup?.P2PMembers.Values ?? Enumerable.Empty<P2PMember>())
-                member.Close();
-            P2PGroup?.P2PMembers.Clear();
-
-            UdpChannel?.CloseAsync();
-            UdpChannel = null;
-            UdpEventLoopGroup?.ShutdownGracefullyAsync(TimeSpan.Zero, TimeSpan.Zero);
-            UdpEventLoopGroup = null;
-            Channel?.CloseAsync();
-            Channel = null;
-            _eventLoopGroup?.ShutdownGracefullyAsync(TimeSpan.Zero, TimeSpan.Zero);
-            _eventLoopGroup = null;
-
-            Clients.TryRemove(ServerType, out _);
-
-            Crypt?.Dispose();
-            Crypt = null;
-
-            base.Dispose();
         }
     }
 }

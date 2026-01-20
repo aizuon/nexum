@@ -24,7 +24,7 @@ namespace BaseLib
             if (callback == null)
                 throw new ArgumentNullException(nameof(callback));
 
-            _callback = elapsed => callback();
+            _callback = _ => callback();
         }
 
         protected override void OnTick(TimeSpan elapsed)

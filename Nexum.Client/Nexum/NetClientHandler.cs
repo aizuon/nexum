@@ -311,13 +311,13 @@ namespace Nexum.Client
 
             client.NexumToServer(notifyHolepunchSuccess);
 
-            if (!client.PingLoop?.IsRunning ?? true)
+            if (!client.UnreliablePingLoop?.IsRunning ?? true)
             {
-                if (client.PingLoop == null)
-                    client.PingLoop = new ThreadLoop(TimeSpan.FromSeconds(ReliableUdpConfig.CsPingInterval),
+                if (client.UnreliablePingLoop == null)
+                    client.UnreliablePingLoop = new ThreadLoop(TimeSpan.FromSeconds(ReliableUdpConfig.CsPingInterval),
                         client.SendUdpPing);
 
-                client.PingLoop.Start();
+                client.UnreliablePingLoop.Start();
             }
         }
 
@@ -1517,7 +1517,7 @@ namespace Nexum.Client
             if (!message.Read(out uint hostId))
                 return;
 
-            if (!message.Read(out uint _))
+            if (!message.Read(out uint frameNumber))
                 return;
 
             var relayedPacket = new ByteArray();

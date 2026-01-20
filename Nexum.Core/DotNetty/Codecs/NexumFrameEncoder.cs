@@ -2,9 +2,8 @@ using System.Collections.Generic;
 using DotNetty.Buffers;
 using DotNetty.Codecs;
 using DotNetty.Transport.Channels;
-using Nexum.Core;
 
-namespace NexumCore.DotNetty.Codecs
+namespace Nexum.Core.DotNetty.Codecs
 {
     internal sealed class NexumFrameEncoder : MessageToMessageEncoder<IByteBuffer>
     {

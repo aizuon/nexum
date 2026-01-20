@@ -134,7 +134,6 @@ namespace Nexum.Core
                         packetsForSender.Add(packetId, defraggingPacket);
 
                         UpdateInferredMtu(mtuLength);
-                        ;
                     }
                     else
                     {

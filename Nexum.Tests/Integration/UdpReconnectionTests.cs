@@ -74,7 +74,7 @@ namespace Nexum.Tests.Integration
 
             int receivedValue = 0;
             var received = new ManualResetEventSlim(false);
-            Server.OnRMIReceive += (_, msg, __) =>
+            Server.OnRMIReceive += (_, msg, _) =>
             {
                 msg.Read(out receivedValue);
                 received.Set();

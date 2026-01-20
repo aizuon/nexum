@@ -17,10 +17,13 @@ namespace Nexum.Client
 
         private double _nextPingTime;
         private double _nextTimeSyncTime;
+
         internal bool EnableDirectP2P = true;
 
         internal double IndirectServerTimeDiff;
+
         internal bool IsClosed;
+
         internal double JitterInternal;
         internal double LastPeerServerPing;
         internal double LastPingInternal;
@@ -32,9 +35,11 @@ namespace Nexum.Client
         internal bool P2PHolepunchStarted;
 
         internal object P2PMutex = new object();
+
         internal int PeerBindPort;
 
         internal NetCrypt PeerCrypt;
+
         internal double PeerFrameRateInternal;
 
         internal IPEndPoint PeerLocalToRemoteSocket;
@@ -48,6 +53,7 @@ namespace Nexum.Client
 
         internal Guid PeerUdpMagicNumber;
         internal IPEndPoint PeerUdpSocket;
+
         internal double RecentPing;
 
         internal uint SelfFrameNumber;
@@ -89,160 +95,6 @@ namespace Nexum.Client
 
         public bool DirectP2PReady => DirectP2P && PeerUdpChannel != null && PeerUdpChannel.Active &&
                                       PeerLocalToRemoteSocket != null;
-
-        internal void InitializeReliableUdp(uint senderFirstFrameNumber, uint receiverExpectedFrameNumber)
-        {
-            ToPeerReliableUdp = new ReliableUdpHost(senderFirstFrameNumber, receiverExpectedFrameNumber)
-            {
-                GetAbsoluteTime = () => Owner.GetAbsoluteTime(),
-                GetRecentPing = () => RecentPing > 0 ? RecentPing : 0.1,
-                GetUdpSendBufferPacketFilledCount = () => 0,
-                IsReliableChannel = () => !DirectP2P,
-                SendOneFrameToUdpLayer = SendReliableUdpFrame
-            };
-
-            ToPeerReliableUdp.OnFailed += OnReliableUdpFailed;
-        }
-
-        private void SendReliableUdpFrame(ReliableUdpFrame frame)
-        {
-            var msg = ReliableUdpHelper.BuildFrameMessage(frame);
-            NexumToPeer(msg);
-        }
-
-        internal void HandleRemoteDisconnect()
-        {
-            Logger.Debug("Remote peer {HostId} disconnected, falling back to relay", HostId);
-            FallbackP2PToRelay(false);
-        }
-
-        private void OnReliableUdpFailed()
-        {
-            Logger.Warning("Reliable UDP to peer {HostId} failed, falling back to relay and requesting re-holepunch",
-                HostId);
-
-            FallbackP2PToRelay();
-        }
-
-        internal void ProcessReceivedReliableUdpFrame(ReliableUdpFrame frame)
-        {
-            ToPeerReliableUdp?.TakeReceivedFrame(frame);
-        }
-
-        internal void FrameMove(double elapsedTime)
-        {
-            double currentTime = Owner.GetAbsoluteTime();
-            ToPeerReliableUdp?.FrameMove(elapsedTime);
-            UdpDefragBoard.PruneStalePackets(currentTime);
-
-            if (!DirectP2P || PeerLocalToRemoteSocket == null)
-                return;
-
-            if (LastUdpReceivedTime > 0)
-            {
-                double timeSinceLastUdp = currentTime - LastUdpReceivedTime;
-                if (timeSinceLastUdp > ReliableUdpConfig.FallbackP2PUdpToTcpTimeout)
-                {
-                    Logger.Warning(
-                        "P2P UDP timeout detected for peer {HostId} ({TimeSinceLastUdp:F1}s since last packet), falling back to relay",
-                        HostId, timeSinceLastUdp);
-
-                    FallbackP2PToRelay();
-                    return;
-                }
-            }
-
-            if (currentTime >= _nextPingTime)
-            {
-                SendP2PPing();
-                _nextPingTime = currentTime + Core.SysUtil.Lerp(
-                    ReliableUdpConfig.P2PPingInterval * 0.5,
-                    ReliableUdpConfig.P2PPingInterval,
-                    Random.Shared.NextDouble());
-            }
-
-            if (currentTime >= _nextTimeSyncTime)
-            {
-                SendTimeSyncPing();
-                _nextTimeSyncTime = currentTime + Core.SysUtil.Lerp(
-                    ReliableUdpConfig.P2PTimeSyncInterval * 0.5,
-                    ReliableUdpConfig.P2PTimeSyncInterval,
-                    Random.Shared.NextDouble());
-            }
-        }
-
-        private void SendTimeSyncPing()
-        {
-            var reportServerTimeAndFrameRatePing = new NetMessage();
-            reportServerTimeAndFrameRatePing.Write(Owner.GetAbsoluteTime());
-            reportServerTimeAndFrameRatePing.Write(Owner.RecentFrameRate);
-
-            RmiToPeer((ushort)NexumOpCode.ReportServerTimeAndFrameRateAndPing, reportServerTimeAndFrameRatePing,
-                reliable: true);
-        }
-
-        private void FallbackP2PToRelay(bool firstChance = true)
-        {
-            lock (P2PMutex)
-            {
-                if (!DirectP2P)
-                    return;
-
-                DirectP2P = false;
-                P2PHolepunchInitiated = false;
-                P2PHolepunchNotified = false;
-                P2PHolepunchStarted = false;
-                LastUdpReceivedTime = 0;
-
-                if (ToPeerReliableUdp != null)
-                {
-                    ToPeerReliableUdp.OnFailed -= OnReliableUdpFailed;
-                    ToPeerReliableUdp = null;
-                }
-
-                PeerUdpChannel?.CloseAsync();
-                PeerUdpChannel = null;
-                PeerUdpEventLoopGroup?.ShutdownGracefullyAsync(TimeSpan.Zero, TimeSpan.Zero);
-                PeerUdpEventLoopGroup = null;
-
-                PeerLocalToRemoteSocket = null;
-                PeerRemoteToLocalSocket = null;
-            }
-
-            if (firstChance)
-            {
-                var notifyDirectP2PDisconnected = new NetMessage();
-                notifyDirectP2PDisconnected.Write(HostId);
-                notifyDirectP2PDisconnected.WriteEnum(ErrorType.P2PUdpFailed);
-                Owner.RmiToServer((ushort)NexumOpCode.P2P_NotifyDirectP2PDisconnected, notifyDirectP2PDisconnected);
-            }
-
-            var notifyJitDirectP2PTriggered = new NetMessage();
-            notifyJitDirectP2PTriggered.Write(HostId);
-            Owner.RmiToServer((ushort)NexumOpCode.NotifyJitDirectP2PTriggered, notifyJitDirectP2PTriggered);
-        }
-
-        private void SendP2PPing()
-        {
-            double currentTime = Owner.GetAbsoluteTime();
-            int paddingSize = MtuDiscovery.GetProbePaddingSize(currentTime);
-
-            var p2pRequestIndirectServerTimeAndPing = new NetMessage();
-            p2pRequestIndirectServerTimeAndPing.WriteEnum(MessageType.P2PRequestIndirectServerTimeAndPing);
-            p2pRequestIndirectServerTimeAndPing.Write(currentTime);
-
-            if (paddingSize > 0)
-            {
-                p2pRequestIndirectServerTimeAndPing.Write(paddingSize);
-                p2pRequestIndirectServerTimeAndPing.WriteZeroes(paddingSize);
-            }
-            else
-            {
-                p2pRequestIndirectServerTimeAndPing.Write(0);
-            }
-
-            NexumToPeer(p2pRequestIndirectServerTimeAndPing);
-        }
 
         public void RmiToPeer(ushort rmiId, NetMessage message, EncryptMode ecMode = EncryptMode.Fast,
             bool forceRelay = false, bool reliable = false)
@@ -321,6 +173,73 @@ namespace Nexum.Client
             }
         }
 
+        internal void InitializeReliableUdp(uint senderFirstFrameNumber, uint receiverExpectedFrameNumber)
+        {
+            ToPeerReliableUdp = new ReliableUdpHost(senderFirstFrameNumber, receiverExpectedFrameNumber)
+            {
+                GetAbsoluteTime = () => Owner.GetAbsoluteTime(),
+                GetRecentPing = () => RecentPing > 0 ? RecentPing : 0.1,
+                GetUdpSendBufferPacketFilledCount = () => 0,
+                IsReliableChannel = () => !DirectP2P,
+                SendOneFrameToUdpLayer = SendReliableUdpFrame
+            };
+
+            ToPeerReliableUdp.OnFailed += OnReliableUdpFailed;
+        }
+
+        internal void HandleRemoteDisconnect()
+        {
+            Logger.Debug("Remote peer {HostId} disconnected, falling back to relay", HostId);
+            FallbackP2PToRelay(false);
+        }
+
+        internal void ProcessReceivedReliableUdpFrame(ReliableUdpFrame frame)
+        {
+            ToPeerReliableUdp?.TakeReceivedFrame(frame);
+        }
+
+        internal void FrameMove(double elapsedTime)
+        {
+            double currentTime = Owner.GetAbsoluteTime();
+            ToPeerReliableUdp?.FrameMove(elapsedTime);
+            UdpDefragBoard.PruneStalePackets(currentTime);
+
+            if (!DirectP2P || PeerLocalToRemoteSocket == null)
+                return;
+
+            if (LastUdpReceivedTime > 0)
+            {
+                double timeSinceLastUdp = currentTime - LastUdpReceivedTime;
+                if (timeSinceLastUdp > ReliableUdpConfig.FallbackP2PUdpToTcpTimeout)
+                {
+                    Logger.Warning(
+                        "P2P UDP timeout detected for peer {HostId} ({TimeSinceLastUdp:F1}s since last packet), falling back to relay",
+                        HostId, timeSinceLastUdp);
+
+                    FallbackP2PToRelay();
+                    return;
+                }
+            }
+
+            if (currentTime >= _nextPingTime)
+            {
+                SendP2PPing();
+                _nextPingTime = currentTime + Core.SysUtil.Lerp(
+                    ReliableUdpConfig.P2PPingInterval * 0.5,
+                    ReliableUdpConfig.P2PPingInterval,
+                    Random.Shared.NextDouble());
+            }
+
+            if (currentTime >= _nextTimeSyncTime)
+            {
+                SendTimeSyncPing();
+                _nextTimeSyncTime = currentTime + Core.SysUtil.Lerp(
+                    ReliableUdpConfig.P2PTimeSyncInterval * 0.5,
+                    ReliableUdpConfig.P2PTimeSyncInterval,
+                    Random.Shared.NextDouble());
+            }
+        }
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal void NexumToPeer(NetMessage data, IPEndPoint endPoint = null)
         {
@@ -328,6 +247,114 @@ namespace Nexum.Client
             {
                 ToPeer(data, endPoint);
             }
+        }
+
+        internal void Close()
+        {
+            Logger.Information("Closing P2P connection to hostId = {HostId}", HostId);
+            IsClosed = true;
+            DirectP2P = false;
+            P2PHolepunchInitiated = false;
+            P2PHolepunchNotified = false;
+            P2PHolepunchStarted = false;
+
+            if (ToPeerReliableUdp != null)
+            {
+                ToPeerReliableUdp.OnFailed -= OnReliableUdpFailed;
+                ToPeerReliableUdp = null;
+            }
+
+            PeerUdpChannel?.CloseAsync();
+            PeerUdpChannel = null;
+            PeerUdpEventLoopGroup?.ShutdownGracefullyAsync(TimeSpan.Zero, TimeSpan.Zero);
+            PeerUdpEventLoopGroup = null;
+        }
+
+        private void SendReliableUdpFrame(ReliableUdpFrame frame)
+        {
+            var msg = ReliableUdpHelper.BuildFrameMessage(frame);
+            NexumToPeer(msg);
+        }
+
+        private void OnReliableUdpFailed()
+        {
+            Logger.Warning("Reliable UDP to peer {HostId} failed, falling back to relay and requesting re-holepunch",
+                HostId);
+
+            FallbackP2PToRelay();
+        }
+
+        private void SendTimeSyncPing()
+        {
+            var reportServerTimeAndFrameRatePing = new NetMessage();
+            reportServerTimeAndFrameRatePing.Write(Owner.GetAbsoluteTime());
+            reportServerTimeAndFrameRatePing.Write(Owner.RecentFrameRate);
+
+            RmiToPeer((ushort)NexumOpCode.ReportServerTimeAndFrameRateAndPing, reportServerTimeAndFrameRatePing,
+                reliable: true);
+        }
+
+        private void FallbackP2PToRelay(bool firstChance = true)
+        {
+            lock (P2PMutex)
+            {
+                if (!DirectP2P)
+                    return;
+
+                DirectP2P = false;
+                P2PHolepunchInitiated = false;
+                P2PHolepunchNotified = false;
+                P2PHolepunchStarted = false;
+                LastUdpReceivedTime = 0;
+
+                if (ToPeerReliableUdp != null)
+                {
+                    ToPeerReliableUdp.OnFailed -= OnReliableUdpFailed;
+                    ToPeerReliableUdp = null;
+                }
+
+                PeerUdpChannel?.CloseAsync();
+                PeerUdpChannel = null;
+                PeerUdpEventLoopGroup?.ShutdownGracefullyAsync(TimeSpan.Zero, TimeSpan.Zero);
+                PeerUdpEventLoopGroup = null;
+
+                PeerLocalToRemoteSocket = null;
+                PeerRemoteToLocalSocket = null;
+            }
+
+            if (firstChance)
+            {
+                var notifyDirectP2PDisconnected = new NetMessage();
+                notifyDirectP2PDisconnected.Write(HostId);
+                notifyDirectP2PDisconnected.WriteEnum(ErrorType.P2PUdpFailed);
+                Owner.RmiToServer((ushort)NexumOpCode.P2P_NotifyDirectP2PDisconnected, notifyDirectP2PDisconnected);
+            }
+
+            var notifyJitDirectP2PTriggered = new NetMessage();
+            notifyJitDirectP2PTriggered.Write(HostId);
+            Owner.RmiToServer((ushort)NexumOpCode.NotifyJitDirectP2PTriggered, notifyJitDirectP2PTriggered);
+        }
+
+        private void SendP2PPing()
+        {
+            double currentTime = Owner.GetAbsoluteTime();
+            int paddingSize = MtuDiscovery.GetProbePaddingSize(currentTime);
+
+            var p2pRequestIndirectServerTimeAndPing = new NetMessage();
+            p2pRequestIndirectServerTimeAndPing.WriteEnum(MessageType.P2PRequestIndirectServerTimeAndPing);
+            p2pRequestIndirectServerTimeAndPing.Write(currentTime);
+
+            if (paddingSize > 0)
+            {
+                p2pRequestIndirectServerTimeAndPing.Write(paddingSize);
+                p2pRequestIndirectServerTimeAndPing.WriteZeroes(paddingSize);
+            }
+            else
+            {
+                p2pRequestIndirectServerTimeAndPing.Write(0);
+            }
+
+            NexumToPeer(p2pRequestIndirectServerTimeAndPing);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -351,27 +378,6 @@ namespace Nexum.Client
                 udpMessage.EndPoint = dest;
                 channel.WriteAndFlushAsync(udpMessage);
             }
-        }
-
-        internal void Close()
-        {
-            Logger.Information("Closing P2P connection to hostId = {HostId}", HostId);
-            IsClosed = true;
-            DirectP2P = false;
-            P2PHolepunchInitiated = false;
-            P2PHolepunchNotified = false;
-            P2PHolepunchStarted = false;
-
-            if (ToPeerReliableUdp != null)
-            {
-                ToPeerReliableUdp.OnFailed -= OnReliableUdpFailed;
-                ToPeerReliableUdp = null;
-            }
-
-            PeerUdpChannel?.CloseAsync();
-            PeerUdpChannel = null;
-            PeerUdpEventLoopGroup?.ShutdownGracefullyAsync(TimeSpan.Zero, TimeSpan.Zero);
-            PeerUdpEventLoopGroup = null;
         }
     }
 }

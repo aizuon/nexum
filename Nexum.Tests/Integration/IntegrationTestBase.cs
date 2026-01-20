@@ -60,7 +60,7 @@ namespace Nexum.Tests.Integration
                 (uint)(DefaultUdpPorts[3] + offset * 10)
             ];
 
-            _unobservedHandler = (sender, e) =>
+            _unobservedHandler = (_, e) =>
             {
                 e.SetObserved();
                 _unobservedExceptions.Add(e.Exception);
