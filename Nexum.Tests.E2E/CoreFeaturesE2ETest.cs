@@ -160,9 +160,9 @@ namespace Nexum.Tests.E2E
             _logger.Information("=== Phase 6: Running E2E Clients ===");
 
             string client1Command =
-                $"cd /tmp/e2e && chmod +x ./Nexum.E2E.Client && ./Nexum.E2E.Client --server-host {_serverInstance.PublicIp} --tcp-port {AwsConfig.TcpPort} --client-id 1";
+                $"export DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1 && cd /tmp/e2e && chmod +x ./Nexum.E2E.Client && ./Nexum.E2E.Client --server-host {_serverInstance.PublicIp} --tcp-port {AwsConfig.TcpPort} --client-id 1";
             string client2Command =
-                $"cd /tmp/e2e && chmod +x ./Nexum.E2E.Client && ./Nexum.E2E.Client --server-host {_serverInstance.PublicIp} --tcp-port {AwsConfig.TcpPort} --client-id 2";
+                $"export DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1 && cd /tmp/e2e && chmod +x ./Nexum.E2E.Client && ./Nexum.E2E.Client --server-host {_serverInstance.PublicIp} --tcp-port {AwsConfig.TcpPort} --client-id 2";
 
             var clientTimeout = TimeSpan.FromMinutes(5);
             var client1Task2 = _ssmRunner.RunCommandAsync(_client1Instance.InstanceId, client1Command, clientTimeout);
