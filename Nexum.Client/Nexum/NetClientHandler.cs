@@ -341,6 +341,7 @@ namespace Nexum.Client
             }
 
             client.Logger.Information("UDP connection established with server, guid = {MagicNumber}", magicNumber);
+            client.OnUdpConnected();
             ProcessPendingP2PConnections(client);
         }
 
@@ -359,7 +360,7 @@ namespace Nexum.Client
             {
                 if (!client.PendingP2PConnections.TryRemove(hostId, out _))
                     continue;
-                if (!client.P2PGroup.P2PMembers.TryGetValue(hostId, out var p2pMember))
+                if (!client.P2PGroup.P2PMembersInternal.TryGetValue(hostId, out var p2pMember))
                     continue;
 
                 lock (p2pMember.P2PMutex)
@@ -419,7 +420,7 @@ namespace Nexum.Client
                 capturedSelfUdpSocket = client.SelfUdpSocket;
             }
 
-            if (!client.P2PGroup.P2PMembers.TryGetValue(hostId, out var p2pMember))
+            if (!client.P2PGroup.P2PMembersInternal.TryGetValue(hostId, out var p2pMember))
             {
                 client.Logger.Warning("PeerUdpServerHolepunchAck => P2P member not found for hostId = {HostId}",
                     hostId);
@@ -481,7 +482,7 @@ namespace Nexum.Client
                 return;
             }
 
-            if (!client.P2PGroup.P2PMembers.TryGetValue(hostId, out var p2pMember))
+            if (!client.P2PGroup.P2PMembersInternal.TryGetValue(hostId, out var p2pMember))
             {
                 client.Logger.Warning("PeerUdpPeerHolepunch => P2P member not found for hostId = {HostId}", hostId);
                 return;
@@ -596,7 +597,7 @@ namespace Nexum.Client
                 || !message.ReadIPEndPoint(ref endpointC))
                 return;
 
-            if (!client.P2PGroup.P2PMembers.TryGetValue(hostId, out var p2pMember))
+            if (!client.P2PGroup.P2PMembersInternal.TryGetValue(hostId, out var p2pMember))
             {
                 client.Logger.Warning("PeerUdpPeerHolepunchAck => P2P member not found for hostId = {HostId}", hostId);
                 return;
@@ -795,7 +796,9 @@ namespace Nexum.Client
                     client.Logger.Debug(
                         "ProcessP2PGroupMemberJoin => skipping P2P UDP socket creation for hostId = {HostId}, enableDirectP2P = false",
                         memberId);
-                    client.P2PGroup.P2PMembers.TryAdd(memberId, newMember);
+                    client.P2PGroup.P2PMembersInternal.TryAdd(memberId, newMember);
+                    client.OnP2PMemberJoin(memberId);
+                    client.OnP2PMemberRelayConnected(memberId);
 
                     var joinAckNoP2P = new NetMessage();
                     joinAckNoP2P.Write(groupHostId);
@@ -810,7 +813,9 @@ namespace Nexum.Client
                     if (targetPort.HasValue)
                         client.AimForPort = (ushort)targetPort.Value;
 
-                    client.P2PGroup.P2PMembers.TryAdd(memberId, newMember);
+                    client.P2PGroup.P2PMembersInternal.TryAdd(memberId, newMember);
+                    client.OnP2PMemberJoin(memberId);
+                    client.OnP2PMemberRelayConnected(memberId);
 
                     Task.Run(() =>
                     {
@@ -900,8 +905,17 @@ namespace Nexum.Client
 
                     if (groupHostId == client.P2PGroup.HostId)
                     {
-                        client.P2PGroup.P2PMembers.TryRemove(memberId, out var p2pMember);
-                        p2pMember?.Close();
+                        client.P2PGroup.P2PMembersInternal.TryRemove(memberId, out var p2pMember);
+                        if (p2pMember != null)
+                        {
+                            if (p2pMember.DirectP2P)
+                                client.OnP2PMemberDirectDisconnected(memberId);
+                            else
+                                client.OnP2PMemberRelayDisconnected(memberId);
+                            p2pMember.Close();
+                        }
+
+                        client.OnP2PMemberLeave(memberId);
                     }
 
                     break;
@@ -918,7 +932,7 @@ namespace Nexum.Client
                         (ErrorType)reason
                     );
 
-                    if (client.P2PGroup.P2PMembers.TryGetValue(memberId, out var p2pMember))
+                    if (client.P2PGroup.P2PMembersInternal.TryGetValue(memberId, out var p2pMember))
                         p2pMember.HandleRemoteDisconnect();
                     else
                         client.Logger.Warning(
@@ -1065,7 +1079,7 @@ namespace Nexum.Client
                         magicNumber = client.UdpMagicNumber;
                     }
 
-                    if (!client.P2PGroup.P2PMembers.TryGetValue(hostId, out var targetMember))
+                    if (!client.P2PGroup.P2PMembersInternal.TryGetValue(hostId, out var targetMember))
                     {
                         client.Logger.Warning("NewDirectP2PConnection => P2P member not found for hostId = {HostId}",
                             hostId);
@@ -1118,7 +1132,7 @@ namespace Nexum.Client
                         "RequestP2PHolepunch => hostId = {HostId}, localEndpoint = {LocalEndpoint}, remoteEndpoint = {RemoteEndpoint}",
                         hostId, localEndpoint, remoteEndpoint);
 
-                    if (!client.P2PGroup.P2PMembers.TryGetValue(hostId, out var p2pMember))
+                    if (!client.P2PGroup.P2PMembersInternal.TryGetValue(hostId, out var p2pMember))
                     {
                         client.Logger.Warning("RequestP2PHolepunch => P2P member not found for hostId = {HostId}",
                             hostId);
@@ -1215,7 +1229,7 @@ namespace Nexum.Client
                         SysUtil.Swap(ref endpointD, ref endpointB);
                     }
 
-                    if (client.P2PGroup.P2PMembers.TryGetValue(hostIdB, out var p2pMember))
+                    if (client.P2PGroup.P2PMembersInternal.TryGetValue(hostIdB, out var p2pMember))
                     {
                         lock (p2pMember.P2PMutex)
                         {
@@ -1240,6 +1254,9 @@ namespace Nexum.Client
                             endpointA,
                             endpointC
                         );
+
+                        client.OnP2PMemberRelayDisconnected(hostIdB);
+                        client.OnP2PMemberDirectConnected(hostIdB);
                     }
 
                     break;
@@ -1257,7 +1274,7 @@ namespace Nexum.Client
                     if (!message.Read(out uint hostId))
                         return;
 
-                    if (client.P2PGroup.P2PMembers.TryGetValue(hostId, out var p2pMember))
+                    if (client.P2PGroup.P2PMembersInternal.TryGetValue(hostId, out var p2pMember))
                     {
                         client.Logger.Debug("RenewP2PConnectionState => hostId = {HostId}", hostId);
 
@@ -1496,7 +1513,7 @@ namespace Nexum.Client
 
             client.ReliablePingLoop.Start();
 
-            client.OnConnectionComplete();
+            client.OnConnected();
         }
 
         private static void UnreliableRelay2Handler(NetClient client, NetMessage message)

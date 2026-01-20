@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Net;
 using Nexum.Core;
 
@@ -8,16 +9,18 @@ namespace Nexum.Client
     {
         public uint HostId { get; internal set; }
 
-        internal ConcurrentDictionary<uint, P2PMember> P2PMembers { get; } =
+        internal ConcurrentDictionary<uint, P2PMember> P2PMembersInternal { get; } =
             new ConcurrentDictionary<uint, P2PMember>();
+
+        public IReadOnlyDictionary<uint, P2PMember> P2PMembers => P2PMembersInternal;
 
         internal P2PMember FindMember(uint clientHostId, IPEndPoint udpEndPoint = null, ushort filterTag = 0,
             uint relayFrom = 0)
         {
-            if (relayFrom != 0 && P2PMembers.TryGetValue(relayFrom, out var relayMember))
+            if (relayFrom != 0 && P2PMembersInternal.TryGetValue(relayFrom, out var relayMember))
                 return relayMember;
 
-            foreach (var member in P2PMembers.Values)
+            foreach (var member in P2PMembersInternal.Values)
             {
                 if (udpEndPoint != null)
                 {
