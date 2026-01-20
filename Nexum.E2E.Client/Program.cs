@@ -256,6 +256,11 @@ namespace Nexum.E2E.Client
 
         private static async Task<bool> RunUdpMessagingScenarioAsync()
         {
+            Log.Information("Joining P2P group to initiate UDP setup...");
+            var joinMessage = new NetMessage();
+            _client.RmiToServer(E2EConstants.RmiJoinP2PGroup, joinMessage);
+
+            Log.Information("Waiting for UDP connection to be established...");
             var udpTimeout = DateTime.UtcNow.AddSeconds(30);
             while (!_client.UdpEnabled && DateTime.UtcNow < udpTimeout)
                 await Task.Delay(100);
@@ -294,9 +299,6 @@ namespace Nexum.E2E.Client
 
         private static async Task<bool> RunRelayedP2PScenarioAsync()
         {
-            var joinMessage = new NetMessage();
-            _client.RmiToServer(E2EConstants.RmiJoinP2PGroup, joinMessage);
-
             Log.Information("Waiting for peer to join P2P group...");
             var peerTimeout = DateTime.UtcNow.AddSeconds(60);
             P2PMember peer = null;
