@@ -322,6 +322,9 @@ namespace Nexum.Client
                 PeerRemoteToLocalSocket = null;
             }
 
+            Owner.OnP2PMemberDirectDisconnected(HostId);
+            Owner.OnP2PMemberRelayConnected(HostId);
+
             if (firstChance)
             {
                 var notifyDirectP2PDisconnected = new NetMessage();

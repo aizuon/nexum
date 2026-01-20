@@ -6,7 +6,7 @@ using Nexum.Client;
 using Nexum.Core;
 using Serilog;
 
-namespace TestClient
+namespace ExampleClient
 {
     public static class Program
     {
@@ -30,7 +30,7 @@ namespace TestClient
                 .CreateLogger();
 
             var client = new NetClient(ServerType.Relay);
-            client.OnConnectionComplete += () =>
+            client.OnConnected += () =>
             {
                 var enterServiceReq = new NetMessage();
 

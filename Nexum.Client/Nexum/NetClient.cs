@@ -23,15 +23,25 @@ namespace Nexum.Client
     {
         public delegate void OnConnectedDelegate();
 
-        public delegate void OnConnectingDelegate();
-
-        public delegate void OnConnectionCompleteDelegate();
-
         public delegate void OnDisconnectedDelegate();
 
-        public delegate void OnHandshakingDelegate();
+        public delegate void OnP2PMemberDirectConnectedDelegate(uint hostId);
+
+        public delegate void OnP2PMemberDirectDisconnectedDelegate(uint hostId);
+
+        public delegate void OnP2PMemberJoinDelegate(uint hostId);
+
+        public delegate void OnP2PMemberLeaveDelegate(uint hostId);
+
+        public delegate void OnP2PMemberRelayConnectedDelegate(uint hostId);
+
+        public delegate void OnP2PMemberRelayDisconnectedDelegate(uint hostId);
 
         public delegate void OnRMIReceiveDelegate(NetMessage message, ushort rmiId);
+
+        public delegate void OnUdpConnectedDelegate();
+
+        public delegate void OnUdpDisconnectedDelegate();
 
         internal static readonly ConcurrentDictionary<ServerType, NetClient> Clients =
             new ConcurrentDictionary<ServerType, NetClient>();
@@ -57,13 +67,17 @@ namespace Nexum.Client
 
         public OnConnectedDelegate OnConnected = () => { };
 
-        public OnConnectingDelegate OnConnecting = () => { };
-        public OnConnectionCompleteDelegate OnConnectionComplete = () => { };
-
         public OnDisconnectedDelegate OnDisconnected = () => { };
+        public OnP2PMemberDirectConnectedDelegate OnP2PMemberDirectConnected = _ => { };
+        public OnP2PMemberDirectDisconnectedDelegate OnP2PMemberDirectDisconnected = _ => { };
 
-        public OnHandshakingDelegate OnHandshaking = () => { };
+        public OnP2PMemberJoinDelegate OnP2PMemberJoin = _ => { };
+        public OnP2PMemberLeaveDelegate OnP2PMemberLeave = _ => { };
+        public OnP2PMemberRelayConnectedDelegate OnP2PMemberRelayConnected = _ => { };
+        public OnP2PMemberRelayDisconnectedDelegate OnP2PMemberRelayDisconnected = _ => { };
         public OnRMIReceiveDelegate OnRMIReceive = (_, _) => { };
+        public OnUdpConnectedDelegate OnUdpConnected = () => { };
+        public OnUdpDisconnectedDelegate OnUdpDisconnected = () => { };
 
         internal uint P2PFirstFrameNumber;
         internal Guid PeerUdpMagicNumber;
@@ -266,9 +280,9 @@ namespace Nexum.Client
                 ToServerReliableUdp = null;
             }
 
-            foreach (var member in P2PGroup?.P2PMembers.Values ?? Enumerable.Empty<P2PMember>())
+            foreach (var member in P2PGroup?.P2PMembersInternal.Values ?? Enumerable.Empty<P2PMember>())
                 member.Close();
-            P2PGroup?.P2PMembers.Clear();
+            P2PGroup?.P2PMembersInternal.Clear();
             P2PGroup = null;
 
             UdpChannel?.CloseAsync();
@@ -323,21 +337,8 @@ namespace Nexum.Client
             var args = new ConnectionStateChangedEventArgs(previousState, newState);
             ConnectionStateChanged?.Invoke(this, args);
 
-            switch (newState)
-            {
-                case ConnectionState.Connecting:
-                    OnConnecting();
-                    break;
-                case ConnectionState.Handshaking:
-                    OnHandshaking();
-                    break;
-                case ConnectionState.Connected:
-                    OnConnected();
-                    break;
-                case ConnectionState.Disconnected:
-                    OnDisconnected();
-                    break;
-            }
+            if (newState == ConnectionState.Disconnected)
+                OnDisconnected();
         }
 
         internal (IChannel Channel, IEventLoopGroup WorkerGroup, int Port, bool PortReuseSuccess) ConnectUdp(
@@ -389,6 +390,7 @@ namespace Nexum.Client
         internal void CloseUdp()
         {
             Logger.Information("Closing UDP channel for {ServerType}", ServerType);
+            bool wasEnabled = UdpEnabled;
             UdpEnabled = false;
             SelfUdpSocket = null;
 
@@ -402,6 +404,9 @@ namespace Nexum.Client
             UdpChannel = null;
             UdpEventLoopGroup?.ShutdownGracefullyAsync(TimeSpan.Zero, TimeSpan.Zero);
             UdpEventLoopGroup = null;
+
+            if (wasEnabled)
+                OnUdpDisconnected();
         }
 
         internal void StartReliableUdpLoop()
@@ -594,7 +599,7 @@ namespace Nexum.Client
             UdpDefragBoard.PruneStalePackets(currentTime);
 
             if (P2PGroup != null)
-                foreach (var member in P2PGroup.P2PMembers.Values)
+                foreach (var member in P2PGroup.P2PMembersInternal.Values)
                     if (!member.IsClosed)
                         member.FrameMove(elapsedTime);
         }

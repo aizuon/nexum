@@ -7,7 +7,7 @@ using Nexum.Core;
 using Nexum.Server;
 using Serilog;
 
-namespace TestServer
+namespace ExampleServer
 {
     public static class Program
     {
