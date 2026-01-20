@@ -87,8 +87,18 @@ namespace Nexum.Tests.E2E.Orchestration
         {
             _logger.Information("Starting background command on {InstanceId}: {Command}", instanceId, command);
 
-            string bgCommand =
-                $"export DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1 && nohup bash -c '{command.Replace("'", "'\\''")}' > /tmp/e2e-output.log 2>&1 & echo $!";
+            string bgCommands = $@"
+cat > /tmp/e2e-start.sh << 'SCRIPT'
+#!/bin/bash
+export DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1
+{command}
+SCRIPT
+chmod +x /tmp/e2e-start.sh
+setsid /tmp/e2e-start.sh > /tmp/e2e-output.log 2>&1 < /dev/null &
+PID=$!
+sleep 1
+echo $PID
+";
 
             var sendResponse = await _ssmClient.SendCommandAsync(new SendCommandRequest
             {
@@ -96,7 +106,7 @@ namespace Nexum.Tests.E2E.Orchestration
                 DocumentName = "AWS-RunShellScript",
                 Parameters = new Dictionary<string, List<string>>
                 {
-                    ["commands"] = [bgCommand]
+                    ["commands"] = [bgCommands]
                 },
                 TimeoutSeconds = 60
             });
