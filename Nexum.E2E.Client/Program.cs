@@ -414,6 +414,8 @@ namespace Nexum.E2E.Client
                 }
 
                 Log.Information("Received and responded to direct P2P message");
+
+                await Task.Delay(1000);
             }
 
             return true;
