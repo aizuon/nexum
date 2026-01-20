@@ -132,9 +132,29 @@ namespace Nexum.Tests.E2E
                 $"cd /tmp/e2e && chmod +x ./Nexum.E2E.Server && ./Nexum.E2E.Server --bind-ip 0.0.0.0 --tcp-port {AwsConfig.TcpPort} --udp-ports {string.Join(",", AwsConfig.UdpPorts)}";
             await _ssmRunner.StartBackgroundCommandAsync(_serverInstance.InstanceId, serverCommand);
 
+            await Task.Delay(TimeSpan.FromSeconds(3));
+
+            var checkResult = await _ssmRunner.RunCommandAsync(_serverInstance.InstanceId,
+                "ps aux | grep -v grep | grep Nexum.E2E.Server && echo '=== Server Log ===' && cat /tmp/e2e-output.log 2>/dev/null || echo 'No log file yet'",
+                TimeSpan.FromSeconds(30));
+            _logger.Information("Server status check:\n{Output}", checkResult.StandardOutput);
+
             _logger.Information("Waiting for server ports to become available...");
-            await _ssmRunner.WaitForPortAsync(_client1Instance.InstanceId, _serverInstance.PublicIp, AwsConfig.TcpPort,
-                "tcp", TimeSpan.FromSeconds(60));
+            try
+            {
+                await _ssmRunner.WaitForPortAsync(_client1Instance.InstanceId, _serverInstance.PublicIp,
+                    AwsConfig.TcpPort,
+                    "tcp", TimeSpan.FromSeconds(60));
+            }
+            catch (TimeoutException)
+            {
+                var logResult = await _ssmRunner.RunCommandAsync(_serverInstance.InstanceId,
+                    "cat /tmp/e2e-output.log 2>/dev/null || echo 'No log file'; ps aux | grep -v grep | grep Nexum || echo 'Server process not running'",
+                    TimeSpan.FromSeconds(30));
+                _logger.Error("Server log on timeout:\n{Log}", logResult.StandardOutput);
+                throw;
+            }
+
             _logger.Information("Server TCP port is ready");
 
             _logger.Information("=== Phase 6: Running E2E Clients ===");
