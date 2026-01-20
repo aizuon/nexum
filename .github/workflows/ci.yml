@@ -48,11 +48,6 @@ jobs:
         with:
           dotnet-version: "10.0.x"
 
-      - name: Download build artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: build-output
-
       - name: Publish E2E Server (linux-arm64)
         run: |
           dotnet publish Nexum.E2E.Server/Nexum.E2E.Server.csproj \
@@ -60,7 +55,6 @@ jobs:
             --runtime linux-arm64 \
             --self-contained true \
             -p:PublishSingleFile=true \
-            --no-build \
             --output ./publish/server
 
       - name: Publish E2E Client (linux-arm64)
@@ -70,7 +64,6 @@ jobs:
             --runtime linux-arm64 \
             --self-contained true \
             -p:PublishSingleFile=true \
-            --no-build \
             --output ./publish/client
 
       - name: Configure AWS credentials
