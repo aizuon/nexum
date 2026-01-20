@@ -98,7 +98,22 @@ namespace Nexum.Tests.E2E.Orchestration
             }
             catch (Exception ex) when (ex.Message.Contains("already attached"))
             {
-                _logger.Debug("Policy already attached to role");
+                _logger.Debug("SSM policy already attached to role");
+            }
+
+            _logger.Information("Attaching S3 read policy to role {RoleName}", _roleName);
+
+            try
+            {
+                await _iamClient.AttachRolePolicyAsync(new AttachRolePolicyRequest
+                {
+                    RoleName = _roleName,
+                    PolicyArn = AwsConfig.S3ReadPolicyArn
+                });
+            }
+            catch (Exception ex) when (ex.Message.Contains("already attached"))
+            {
+                _logger.Debug("S3 policy already attached to role");
             }
         }
 
@@ -197,14 +212,31 @@ namespace Nexum.Tests.E2E.Orchestration
                     RoleName = _roleName,
                     PolicyArn = AwsConfig.IamPolicyArn
                 });
-                _logger.Debug("Detached policy from role");
+                _logger.Debug("Detached SSM policy from role");
             }
             catch (NoSuchEntityException)
             {
             }
             catch (Exception ex)
             {
-                _logger.Warning(ex, "Failed to detach policy from role");
+                _logger.Warning(ex, "Failed to detach SSM policy from role");
+            }
+
+            try
+            {
+                await _iamClient.DetachRolePolicyAsync(new DetachRolePolicyRequest
+                {
+                    RoleName = _roleName,
+                    PolicyArn = AwsConfig.S3ReadPolicyArn
+                });
+                _logger.Debug("Detached S3 policy from role");
+            }
+            catch (NoSuchEntityException)
+            {
+            }
+            catch (Exception ex)
+            {
+                _logger.Warning(ex, "Failed to detach S3 policy from role");
             }
 
             try

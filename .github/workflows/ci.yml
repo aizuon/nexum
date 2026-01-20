@@ -105,5 +105,6 @@ jobs:
           aws iam remove-role-from-instance-profile --instance-profile-name nexum-e2e-instance-profile --role-name nexum-e2e-instance-role || true
           aws iam delete-instance-profile --instance-profile-name nexum-e2e-instance-profile || true
           aws iam detach-role-policy --role-name nexum-e2e-instance-role --policy-arn arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore || true
+          aws iam detach-role-policy --role-name nexum-e2e-instance-role --policy-arn arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess || true
           aws iam delete-role --role-name nexum-e2e-instance-role || true
 

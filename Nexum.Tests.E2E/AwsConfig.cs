@@ -5,6 +5,7 @@ namespace Nexum.Tests.E2E
         public const string S3BucketName = "nexum-e2e-artifacts";
         public const string IamRoleName = "nexum-e2e-instance-role";
         public const string IamPolicyArn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore";
+        public const string S3ReadPolicyArn = "arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess";
         public const string InstanceProfileName = "nexum-e2e-instance-profile";
         public const string SecurityGroupName = "nexum-e2e-sg";
         public const string ResourceTagKey = "nexum-e2e";
