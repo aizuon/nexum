@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Net;
 using System.Runtime.CompilerServices;
 using System.Threading.Tasks;
@@ -176,6 +177,31 @@ namespace Nexum.Core
             {
                 return func();
             }
+        }
+
+        internal static IPEndPoint[] GeneratePredictedEndpoints(IPEndPoint knownEndpoint, int count, int portRange)
+        {
+            if (knownEndpoint == null || count <= 0)
+                return Array.Empty<IPEndPoint>();
+
+            var endpoints = new List<IPEndPoint>(count);
+            int basePort = knownEndpoint.Port;
+
+            for (int i = 1; i <= portRange && endpoints.Count < count; i++)
+            {
+                int portAbove = basePort + i;
+                if (portAbove <= 65535 && portAbove != basePort)
+                    endpoints.Add(new IPEndPoint(knownEndpoint.Address, portAbove));
+
+                if (endpoints.Count >= count)
+                    break;
+
+                int portBelow = basePort - i;
+                if (portBelow >= 1024 && portBelow != basePort)
+                    endpoints.Add(new IPEndPoint(knownEndpoint.Address, portBelow));
+            }
+
+            return endpoints.ToArray();
         }
     }
 }

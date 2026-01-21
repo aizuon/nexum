@@ -4,6 +4,10 @@ namespace Nexum.Core
     {
         internal const int BurstCount = 8;
         internal const int BurstDelayMs = 50;
+
+        internal const int NatPortShotgunTrialCount = 8;
+        internal const int NatPortShotgunRange = 16;
+
         internal const int UdpMatchedDelayMs = 75;
         internal const int RetryIntervalMs = 1500;
         internal const int MaxRetryAttempts = 15;

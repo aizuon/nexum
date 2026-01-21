@@ -340,7 +340,7 @@ namespace Nexum.Client
                 client.StartReliableUdpLoop();
             }
 
-            client.Logger.Information("UDP connection established with server, guid = {MagicNumber}", magicNumber);
+            client.Logger.Debug("UDP connection established with server, guid = {MagicNumber}", magicNumber);
             client.OnUdpConnected();
             ProcessPendingP2PConnections(client);
         }
@@ -492,7 +492,7 @@ namespace Nexum.Client
             {
                 if (!magicNumber.Equals(client.PeerUdpMagicNumber))
                 {
-                    client.Logger.Debug(
+                    client.Logger.Warning(
                         "PeerUdpPeerHolepunch => peer magic number mismatch for hostId = {HostId}, expected {Expected}, got {Actual}",
                         hostId, client.PeerUdpMagicNumber, magicNumber);
                     return;
@@ -550,6 +550,13 @@ namespace Nexum.Client
                                && NetUtil.IsSameLan(capturedMember.SelfUdpSocket, peerUdpSocket)
                                && NetUtil.IsSameLan(peerUdpLocalSocket, selfUdpSocketLocal);
 
+                var predictedEndpoints = hasPublicEndpoint
+                    ? HolepunchHelper.GeneratePredictedEndpoints(
+                        peerUdpSocket,
+                        HolepunchConfig.NatPortShotgunTrialCount,
+                        HolepunchConfig.NatPortShotgunRange)
+                    : Array.Empty<IPEndPoint>();
+
                 for (int burst = 0; burst < HolepunchConfig.BurstCount; burst++)
                 {
                     if (capturedMember.IsClosed || capturedMember.DirectP2P)
@@ -567,10 +574,18 @@ namespace Nexum.Client
                             peerUdpLocalSocket);
 
                     if (hasPublicEndpoint)
+                    {
                         capturedMember.NexumToPeer(
                             HolepunchHelper.CreatePeerUdpPeerHolepunchAckMessage(
                                 magicNumber, client.HostId, selfUdpSocket, udpEndPoint, peerUdpSocket),
                             peerUdpSocket);
+
+                        foreach (var predictedEndpoint in predictedEndpoints)
+                            capturedMember.NexumToPeer(
+                                HolepunchHelper.CreatePeerUdpPeerHolepunchAckMessage(
+                                    magicNumber, client.HostId, selfUdpSocket, udpEndPoint, predictedEndpoint),
+                                predictedEndpoint);
+                    }
 
                     if (!sameLan && hasLocalEndpoint)
                         capturedMember.NexumToPeer(
@@ -607,7 +622,7 @@ namespace Nexum.Client
             {
                 if (!magicNumber.Equals(p2pMember.PeerUdpMagicNumber))
                 {
-                    client.Logger.Debug(
+                    client.Logger.Warning(
                         "PeerUdpPeerHolepunchAck => magic number mismatch for hostId = {HostId}, expected {Expected}, got {Actual}",
                         hostId, p2pMember.PeerUdpMagicNumber, magicNumber);
                     return;
@@ -760,7 +775,7 @@ namespace Nexum.Client
             uint p2pFirstFrameNumber, Guid peerUdpMagicNumber, bool enableDirectP2P, int bindPort, string logName,
             ByteArray sessionKey = null, ByteArray fastSessionKey = null)
         {
-            client.Logger.Information(
+            client.Logger.Debug(
                 "{LogName} => memberId = {MemberId}, groupHostId = {GroupHostId}, eventId = {EventId}, enableDirectP2P = {EnableDirectP2P}, bindPort = {BindPort}",
                 logName, memberId, groupHostId, eventId, enableDirectP2P, bindPort);
 
@@ -899,7 +914,7 @@ namespace Nexum.Client
                     if (!message.Read(out uint memberId) || !message.Read(out uint groupHostId))
                         return;
 
-                    client.Logger.Information(
+                    client.Logger.Debug(
                         "P2PGroup_MemberLeave => memberId = {MemberId}, groupHostId = {GroupHostId}",
                         memberId, groupHostId);
 
@@ -1013,12 +1028,10 @@ namespace Nexum.Client
                         return;
                     }
 
-                    // Use the server's actual IP from the TCP connection, not the loopback sent by server
-                    // This enables UDP holepunching to work across different machines
                     var serverTcpAddress = ((IPEndPoint)client.Channel.RemoteAddress).Address;
                     var actualUdpEndpoint = new IPEndPoint(serverTcpAddress, udpSocket.Port);
 
-                    client.Logger.Information(
+                    client.Logger.Debug(
                         "S2C_CreateUdpSocketAck => server sent {SentSocket}, using {ActualSocket}", udpSocket,
                         actualUdpEndpoint);
 
@@ -1184,6 +1197,11 @@ namespace Nexum.Client
                         bool sameLan = hasLocalEndpoint && hasPublicEndpoint &&
                                        NetUtil.IsSameLan(localEndpoint, remoteEndpoint);
 
+                        var predictedEndpoints = HolepunchHelper.GeneratePredictedEndpoints(
+                            remoteEndpoint,
+                            HolepunchConfig.NatPortShotgunTrialCount,
+                            HolepunchConfig.NatPortShotgunRange);
+
                         for (int burst = 0; burst < HolepunchConfig.BurstCount; burst++)
                         {
                             if (capturedMember.IsClosed || capturedMember.DirectP2P)
@@ -1197,11 +1215,20 @@ namespace Nexum.Client
                                     localEndpoint);
 
                             if (hasPublicEndpoint)
+                            {
                                 capturedMember.NexumToPeer(
                                     HolepunchHelper.CreatePeerUdpPeerHolepunchMessage(
                                         client.HostId, capturedPeerMagicNumber, client.ServerGuid,
                                         remoteEndpoint),
                                     remoteEndpoint);
+
+                                foreach (var predictedEndpoint in predictedEndpoints)
+                                    capturedMember.NexumToPeer(
+                                        HolepunchHelper.CreatePeerUdpPeerHolepunchMessage(
+                                            client.HostId, capturedPeerMagicNumber, client.ServerGuid,
+                                            predictedEndpoint),
+                                        predictedEndpoint);
+                            }
 
                             if (!sameLan && hasLocalEndpoint)
                                 capturedMember.NexumToPeer(
@@ -1257,9 +1284,12 @@ namespace Nexum.Client
                             p2pMember.PeerRemoteToLocalSocket = endpointD;
                             p2pMember.SelfLocalToRemoteSocket = endpointC;
                             p2pMember.SelfRemoteToLocalSocket = endpointB;
+
+                            if (p2pMember.ToPeerReliableUdp == null)
+                                p2pMember.ReinitializeReliableUdp();
                         }
 
-                        client.Logger.Information(
+                        client.Logger.Debug(
                             "Direct P2P established => hostId = {HostIdB}, peerEndpoint = {EndpointA}, selfEndpoint = {EndpointC}",
                             hostIdB,
                             endpointA,
@@ -1291,7 +1321,6 @@ namespace Nexum.Client
 
                         lock (p2pMember.P2PMutex)
                         {
-                            p2pMember.DirectP2P = false;
                             p2pMember.Close();
                             p2pMember.IsClosed = false;
                         }

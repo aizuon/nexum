@@ -143,7 +143,7 @@ namespace Nexum.Tests.E2E.Orchestration
             });
 
             InstanceProfileArn = response.InstanceProfile.Arn;
-            _logger.Information("Instance profile created: {Arn}", InstanceProfileArn);
+            _logger.Information("Instance profile {ProfileName} created", _instanceProfileName);
         }
 
         private async Task AddRoleToInstanceProfileAsync()

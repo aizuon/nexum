@@ -1,7 +1,7 @@
 using System;
 using System.Diagnostics;
-using System.Net;
 using System.Threading.Tasks;
+using BaseLib.Extensions;
 using DotNetty.Transport.Channels;
 using Nexum.Core;
 using Serilog;
@@ -28,7 +28,7 @@ namespace Nexum.Server
             var message = obj as UdpMessage;
 
             var log = Logger.ForContext("EndPoint",
-                new IPEndPoint(message.EndPoint.Address.MapToIPv4(), message.EndPoint.Port).ToString());
+                message.EndPoint.ToIPv4String());
 
             Owner.UdpSessions.TryGetValue(message.FilterTag, out var session);
 
@@ -87,7 +87,7 @@ namespace Nexum.Server
                     Owner.UdpSessions.TryAdd(FilterTag.Create(session2.HostId, (uint)HostId.Server), session2);
                 }
 
-                session2.Logger.Information("UDP holepunch successful, endpoint = {UdpEndPoint}",
+                session2.Logger.Debug("UDP holepunch successful, endpoint = {UdpEndPoint}",
                     session2.UdpEndPoint);
 
                 var serverHolepunchAck = new NetMessage();

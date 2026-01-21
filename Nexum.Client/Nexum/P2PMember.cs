@@ -4,6 +4,7 @@ using System.Runtime.CompilerServices;
 using DotNetty.Transport.Channels;
 using Nexum.Core;
 using Serilog;
+using Constants = Serilog.Core.Constants;
 
 namespace Nexum.Client
 {
@@ -40,6 +41,8 @@ namespace Nexum.Client
 
         internal NetCrypt PeerCrypt;
 
+        internal uint PeerFirstFrameNumber;
+
         internal double PeerFrameRateInternal;
 
         internal IPEndPoint PeerLocalToRemoteSocket;
@@ -69,7 +72,8 @@ namespace Nexum.Client
             Owner = owner;
             GroupId = groupId;
             HostId = hostId;
-            Logger = owner.Logger.ForContext("P2PMember", hostId);
+            Logger = Log.ForContext("HostId", HostId).ForContext(Constants.SourceContextPropertyName,
+                $"{owner.ServerType}P2PMember({HostId})");
 
             UdpDefragBoard.LocalHostId = owner.HostId;
             UdpFragBoard.MtuDiscovery = MtuDiscovery;
@@ -146,7 +150,7 @@ namespace Nexum.Client
                 SelfFrameNumber++;
 
                 var wrappedData = new NetMessage();
-                wrappedData.Write(Constants.TcpSplitter);
+                wrappedData.Write(Core.Constants.TcpSplitter);
                 wrappedData.Write((ByteArray)data);
 
                 reliableRelay.Write((ByteArray)wrappedData);
@@ -175,6 +179,8 @@ namespace Nexum.Client
 
         internal void InitializeReliableUdp(uint senderFirstFrameNumber, uint receiverExpectedFrameNumber)
         {
+            PeerFirstFrameNumber = receiverExpectedFrameNumber;
+
             ToPeerReliableUdp = new ReliableUdpHost(senderFirstFrameNumber, receiverExpectedFrameNumber)
             {
                 GetAbsoluteTime = () => Owner.GetAbsoluteTime(),
@@ -185,6 +191,27 @@ namespace Nexum.Client
             };
 
             ToPeerReliableUdp.OnFailed += OnReliableUdpFailed;
+        }
+
+        internal void ReinitializeReliableUdp()
+        {
+            if (ToPeerReliableUdp != null)
+            {
+                ToPeerReliableUdp.OnFailed -= OnReliableUdpFailed;
+                ToPeerReliableUdp = null;
+            }
+
+            ToPeerReliableUdp = new ReliableUdpHost(Owner.P2PFirstFrameNumber, PeerFirstFrameNumber)
+            {
+                GetAbsoluteTime = () => Owner.GetAbsoluteTime(),
+                GetRecentPing = () => RecentPing > 0 ? RecentPing : 0.1,
+                GetUdpSendBufferPacketFilledCount = () => 0,
+                IsReliableChannel = () => !DirectP2P,
+                SendOneFrameToUdpLayer = SendReliableUdpFrame
+            };
+
+            ToPeerReliableUdp.OnFailed += OnReliableUdpFailed;
+            Logger.Debug("Reinitialized reliable UDP for peer {HostId}", HostId);
         }
 
         internal void HandleRemoteDisconnect()
@@ -251,12 +278,13 @@ namespace Nexum.Client
 
         internal void Close()
         {
-            Logger.Information("Closing P2P connection to hostId = {HostId}", HostId);
+            Logger.Debug("Closing P2P connection to hostId = {HostId}", HostId);
             IsClosed = true;
             DirectP2P = false;
             P2PHolepunchInitiated = false;
             P2PHolepunchNotified = false;
             P2PHolepunchStarted = false;
+            LastUdpReceivedTime = 0;
 
             if (ToPeerReliableUdp != null)
             {
@@ -268,6 +296,9 @@ namespace Nexum.Client
             PeerUdpChannel = null;
             PeerUdpEventLoopGroup?.ShutdownGracefullyAsync(TimeSpan.Zero, TimeSpan.Zero);
             PeerUdpEventLoopGroup = null;
+
+            PeerLocalToRemoteSocket = null;
+            PeerRemoteToLocalSocket = null;
         }
 
         private void SendReliableUdpFrame(ReliableUdpFrame frame)
@@ -301,25 +332,8 @@ namespace Nexum.Client
                 if (!DirectP2P)
                     return;
 
-                DirectP2P = false;
-                P2PHolepunchInitiated = false;
-                P2PHolepunchNotified = false;
-                P2PHolepunchStarted = false;
-                LastUdpReceivedTime = 0;
-
-                if (ToPeerReliableUdp != null)
-                {
-                    ToPeerReliableUdp.OnFailed -= OnReliableUdpFailed;
-                    ToPeerReliableUdp = null;
-                }
-
-                PeerUdpChannel?.CloseAsync();
-                PeerUdpChannel = null;
-                PeerUdpEventLoopGroup?.ShutdownGracefullyAsync(TimeSpan.Zero, TimeSpan.Zero);
-                PeerUdpEventLoopGroup = null;
-
-                PeerLocalToRemoteSocket = null;
-                PeerRemoteToLocalSocket = null;
+                Close();
+                IsClosed = false;
             }
 
             Owner.OnP2PMemberDirectDisconnected(HostId);

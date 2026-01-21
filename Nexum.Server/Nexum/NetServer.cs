@@ -117,7 +117,7 @@ namespace Nexum.Server
             RSA?.Dispose();
             RSA = newRsa;
 
-            Logger.Information("RSA key imported from XML format");
+            Logger.Debug("RSA key imported from XML format");
         }
 
         public void ImportRsaKey(RSAParameters parameters)
@@ -128,7 +128,7 @@ namespace Nexum.Server
             RSA?.Dispose();
             RSA = newRsa;
 
-            Logger.Information("RSA key imported from RSAParameters");
+            Logger.Debug("RSA key imported from RSAParameters");
         }
 
         public void ImportRsaPrivateKey(byte[] privateKey)
@@ -150,7 +150,7 @@ namespace Nexum.Server
             RSA?.Dispose();
             RSA = newRsa;
 
-            Logger.Information("RSA private key imported");
+            Logger.Debug("RSA private key imported");
         }
 
         public void ImportRsaPrivateKeyFromPem(string pemString)
@@ -164,7 +164,7 @@ namespace Nexum.Server
             RSA?.Dispose();
             RSA = newRsa;
 
-            Logger.Information("RSA private key imported from PEM");
+            Logger.Debug("RSA private key imported from PEM");
         }
 
         public byte[] ExportRsaPublicKey()
@@ -229,9 +229,9 @@ namespace Nexum.Server
 
             RetryUdpOrHolepunchIfRequired(this, null);
 
-            Logger.Information("Listening on {Endpoint}", endPoint.ToIPv4String());
+            Logger.Debug("Listening on {Endpoint}", endPoint.ToIPv4String());
 
-            Logger.Information(
+            Logger.Debug(
                 "Server started: DirectP2P={AllowDirectP2P}, UDP ports={UdpPortCount}, Encryption={EncryptionKeyLength}bit",
                 AllowDirectP2P,
                 udpListenerPorts?.Length ?? 0,
@@ -240,7 +240,7 @@ namespace Nexum.Server
 
         public override void Dispose()
         {
-            Logger.Information("Shutting down {ServerType} server with {SessionCount} active sessions",
+            Logger.Debug("Shutting down {ServerType} server with {SessionCount} active sessions",
                 ServerType, SessionsInternal.Count);
 
             _reliableUdpLoop?.Stop();
@@ -309,7 +309,7 @@ namespace Nexum.Server
             if (session.UdpSocket != null)
                 return;
 
-            Logger.Information("Initiating UDP setup for hostId = {HostId}", session.HostId);
+            session.Logger.Debug("Initiating UDP setup for hostId = {HostId}", session.HostId);
 
             SendUdpSocketRequest(session);
         }
@@ -360,7 +360,7 @@ namespace Nexum.Server
                 if (!shouldInitialize)
                     continue;
 
-                Logger.Debug("Initiating immediate P2P connection between {HostId} and {TargetHostId}",
+                session.Logger.Debug("Initiating immediate P2P connection between {HostId} and {TargetHostId}",
                     session.HostId, stateToTarget.RemotePeer.Session.HostId);
 
                 InitializeP2PConnection(session, stateToTarget, stateFromTarget);
@@ -481,7 +481,7 @@ namespace Nexum.Server
                     else if (timeSinceLastPing >= UdpPingTimeout)
                     {
                         session.Logger.Debug("Fallback to TCP relay by server => {HostId}", session.HostId);
-                        session.UdpEnabled = false;
+                        session.ResetUdp();
                         server.UdpSessions.TryRemove(FilterTag.Create(session.HostId, (uint)HostId.Server), out var _);
                         session.RmiToClient((ushort)NexumOpCode.NotifyUdpToTcpFallbackByServer, new NetMessage());
                     }
@@ -504,6 +504,8 @@ namespace Nexum.Server
 
                     bool isInitialized = false;
                     bool shouldRetry = false;
+                    bool sessionNeedsRenew = false;
+                    bool targetNeedsRenew = false;
 
                     HolepunchHelper.WithOrderedLocks(
                         session.HostId,
@@ -516,9 +518,17 @@ namespace Nexum.Server
                             if (isInitialized)
                             {
                                 var diff = now - stateToTarget.LastHolepunch;
-                                int backoffSeconds = Math.Min(8 * (1 << (int)stateToTarget.RetryCount), 60);
-                                if (!stateToTarget.HolepunchSuccess &&
-                                    diff >= TimeSpan.FromSeconds(backoffSeconds) &&
+                                int backoffSeconds = Math.Min(8 * (1 << (int)stateToTarget.RetryCount), 120);
+
+                                if (stateToTarget.HolepunchSuccess)
+                                    return;
+
+                                bool bothHaveProgress = stateToTarget.PeerUdpHolepunchSuccess &&
+                                                        stateFromTarget.PeerUdpHolepunchSuccess;
+                                if (bothHaveProgress)
+                                    return;
+
+                                if (diff >= TimeSpan.FromSeconds(backoffSeconds) &&
                                     stateToTarget.RetryCount < HolepunchConfig.MaxRetryAttempts)
                                 {
                                     shouldRetry = true;
@@ -528,7 +538,13 @@ namespace Nexum.Server
                                     stateToTarget.JitTriggered = stateFromTarget.JitTriggered = false;
                                     stateToTarget.NewConnectionSent = stateFromTarget.NewConnectionSent = false;
                                     stateToTarget.EstablishSent = stateFromTarget.EstablishSent = false;
-                                    stateToTarget.PeerUdpHolepunchSuccess =
+
+                                    sessionNeedsRenew = !stateToTarget.PeerUdpHolepunchSuccess;
+                                    targetNeedsRenew = !stateFromTarget.PeerUdpHolepunchSuccess;
+
+                                    if (sessionNeedsRenew)
+                                        stateToTarget.PeerUdpHolepunchSuccess = false;
+                                    if (targetNeedsRenew)
                                         stateFromTarget.PeerUdpHolepunchSuccess = false;
                                     stateToTarget.LastHolepunch = stateFromTarget.LastHolepunch = now;
                                 }
@@ -537,16 +553,22 @@ namespace Nexum.Server
 
                     if (isInitialized && shouldRetry)
                     {
-                        session.Logger.Debug(
-                            "Trying to reconnect P2P to {TargetHostId} {RetryCount}/{MaxCount}",
-                            stateToTarget.RemotePeer.Session.HostId, stateToTarget.RetryCount, HolepunchConfig
-                                .MaxRetryAttempts);
-                        stateFromTarget.RemotePeer.Session.Logger.Debug(
-                            "Trying to reconnect P2P to {TargetHostId} {RetryCount}/{MaxCount}",
-                            session.HostId, stateFromTarget.RetryCount, HolepunchConfig.MaxRetryAttempts);
+                        if (sessionNeedsRenew)
+                        {
+                            session.Logger.Debug(
+                                "Trying to reconnect P2P to {TargetHostId} {RetryCount}/{MaxCount}",
+                                stateToTarget.RemotePeer.Session.HostId, stateToTarget.RetryCount, HolepunchConfig
+                                    .MaxRetryAttempts);
+                            SendRenewP2PConnectionState(session, stateToTarget.RemotePeer.Session.HostId);
+                        }
 
-                        SendRenewP2PConnectionState(session, stateToTarget.RemotePeer.Session.HostId);
-                        SendRenewP2PConnectionState(stateToTarget.RemotePeer.Session, session.HostId);
+                        if (targetNeedsRenew)
+                        {
+                            stateFromTarget.RemotePeer.Session.Logger.Debug(
+                                "Trying to reconnect P2P to {TargetHostId} {RetryCount}/{MaxCount}",
+                                session.HostId, stateFromTarget.RetryCount, HolepunchConfig.MaxRetryAttempts);
+                            SendRenewP2PConnectionState(stateToTarget.RemotePeer.Session, session.HostId);
+                        }
                     }
                     else if (!isInitialized)
                     {

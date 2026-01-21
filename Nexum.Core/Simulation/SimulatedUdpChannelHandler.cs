@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
+using BaseLib.Extensions;
 using DotNetty.Buffers;
 using DotNetty.Transport.Channels;
 using DotNetty.Transport.Channels.Sockets;
@@ -366,8 +367,6 @@ namespace Nexum.Core.Simulation
             };
         }
 
-        #region NAT Simulation
-
         private void RecordOutboundDestination(IPEndPoint destination)
         {
             var now = DateTime.UtcNow;
@@ -414,14 +413,40 @@ namespace Nexum.Core.Simulation
                     return _allowedAddresses.ContainsKey(sender.Address);
 
                 case NatType.PortRestricted:
-                    return _allowedEndpoints.ContainsKey(sender);
+                    if (_allowedEndpoints.ContainsKey(sender))
+                        return true;
+
+                    foreach (var (endpoint, timestamp) in _allowedEndpoints)
+                        if (endpoint.Address.Equals(sender.Address))
+                        {
+                            double timeSinceSent = (DateTime.UtcNow - timestamp).TotalMilliseconds;
+                            if (timeSinceSent < 500)
+                            {
+                                _allowedEndpoints[sender] = DateTime.UtcNow;
+                                return true;
+                            }
+                        }
+
+                    return false;
 
                 case NatType.Symmetric:
                     if (_allowedEndpoints.ContainsKey(sender))
                         return true;
 
-                    int attempts = _symmetricHolepunchAttempts.AddOrUpdate(sender, 1, (_, count) => count + 1);
+                    foreach (var kvp in _symmetricPortMappings)
+                        if (kvp.Key.Address.Equals(sender.Address))
+                        {
+                            int mappedPort = kvp.Value;
+                            int portDiff = Math.Abs(sender.Port - mappedPort);
 
+                            if (portDiff <= HolepunchConfig.NatPortShotgunRange)
+                            {
+                                _allowedEndpoints[sender] = DateTime.UtcNow;
+                                return true;
+                            }
+                        }
+
+                    int attempts = _symmetricHolepunchAttempts.AddOrUpdate(sender, 1, (_, count) => count + 1);
                     if (attempts >= 5)
                     {
                         double successChance = Math.Min(0.25, 0.05 + (attempts - 5) * 0.02);
@@ -441,22 +466,24 @@ namespace Nexum.Core.Simulation
 
         private static IPEndPoint GetSenderEndpoint(object message)
         {
-            return message switch
+            var endpoint = message switch
             {
                 DatagramPacket packet => packet.Sender as IPEndPoint,
                 UdpMessage udpMessage => udpMessage.EndPoint,
                 _ => null
             };
+            return endpoint.ToIPv4EndPoint();
         }
 
         private static IPEndPoint GetDestinationEndpoint(object message)
         {
-            return message switch
+            var endpoint = message switch
             {
                 DatagramPacket packet => packet.Recipient as IPEndPoint,
                 UdpMessage udpMessage => udpMessage.EndPoint,
                 _ => null
             };
+            return endpoint.ToIPv4EndPoint();
         }
 
         private void CleanupStaleNatEntries(DateTime now)
@@ -467,16 +494,14 @@ namespace Nexum.Core.Simulation
                 if (kvp.Value < cutoff)
                     _allowedAddresses.TryRemove(kvp.Key, out _);
 
-            foreach (var kvp in _allowedEndpoints)
-                if (kvp.Value < cutoff)
+            foreach (var (endpoint, timestamp) in _allowedEndpoints)
+                if (timestamp < cutoff)
                 {
-                    _allowedEndpoints.TryRemove(kvp.Key, out _);
-                    _symmetricPortMappings.TryRemove(kvp.Key, out _);
-                    _symmetricHolepunchAttempts.TryRemove(kvp.Key, out _);
+                    _allowedEndpoints.TryRemove(endpoint, out _);
+                    _symmetricPortMappings.TryRemove(endpoint, out _);
+                    _symmetricHolepunchAttempts.TryRemove(endpoint, out _);
                 }
         }
-
-        #endregion
     }
 
     internal static class ByteBufferExtensions

@@ -33,7 +33,7 @@ namespace Nexum.Tests.Integration
                 new object[] { "HomeWifi", true },
                 new object[] { "Mobile4G", true },
                 new object[] { "PoorMobile", true },
-                new object[] { "PortRestrictedNat", false },
+                new object[] { "PortRestrictedNat", true },
                 new object[] { "SymmetricNat", false }
             };
 
@@ -182,8 +182,13 @@ namespace Nexum.Tests.Integration
 
             if (expectDirectP2P)
             {
-                Assert.True(peer1.DirectP2P, "Peer1 should have direct P2P connection");
-                Assert.True(peer2.DirectP2P, "Peer2 should have direct P2P connection");
+                Assert.True(peer1.DirectP2P, $"[{profileName}] Peer1 should have direct P2P connection");
+                Assert.True(peer2.DirectP2P, $"[{profileName}] Peer2 should have direct P2P connection");
+            }
+            else
+            {
+                Output.WriteLine(
+                    $"[{profileName}] DirectP2P status - Peer1: {peer1.DirectP2P}, Peer2: {peer2.DirectP2P}");
             }
 
             int client1Received = 0;

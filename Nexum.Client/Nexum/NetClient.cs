@@ -164,7 +164,7 @@ namespace Nexum.Client
                 throw new ArgumentNullException(nameof(derEncodedKey));
 
             PinnedServerPublicKey = derEncodedKey;
-            Logger.Information("Server public key pinned for certificate validation");
+            Logger.Debug("Server public key pinned for certificate validation");
         }
 
         public void SetPinnedServerPublicKey(string base64Key)
@@ -173,13 +173,13 @@ namespace Nexum.Client
                 throw new ArgumentNullException(nameof(base64Key));
 
             PinnedServerPublicKey = Convert.FromBase64String(base64Key);
-            Logger.Information("Server public key pinned for certificate validation");
+            Logger.Debug("Server public key pinned for certificate validation");
         }
 
         public void ClearPinnedServerPublicKey()
         {
             PinnedServerPublicKey = null;
-            Logger.Information("Server public key pinning disabled");
+            Logger.Debug("Server public key pinning disabled");
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -215,12 +215,12 @@ namespace Nexum.Client
                 .Option(ChannelOption.Allocator, UnpooledByteBufferAllocator.Default)
                 .ConnectAsync(ipEndPoint);
 
-            Logger.Information("TCP connection established to {Endpoint}", ipEndPoint.ToIPv4String());
+            Logger.Debug("TCP connection established to {Endpoint}", ipEndPoint.ToIPv4String());
         }
 
         public void Close()
         {
-            Logger.Information("Initiating graceful TCP shutdown to {ServerType}", ServerType);
+            Logger.Debug("Initiating graceful TCP shutdown to {ServerType}", ServerType);
             var shutdownTcp = new NetMessage();
 
             shutdownTcp.Write(new ByteArray());
@@ -263,7 +263,7 @@ namespace Nexum.Client
 
         public override void Dispose()
         {
-            Logger.Information("Disposing NetClient for {ServerType}", ServerType);
+            Logger.Debug("Disposing NetClient for {ServerType}", ServerType);
 
             SetConnectionState(ConnectionState.Disconnected);
 
@@ -332,7 +332,7 @@ namespace Nexum.Client
                 _connectionState = newState;
             }
 
-            Logger.Information("Connection state changed: {PreviousState} -> {NewState}", previousState, newState);
+            Logger.Debug("Connection state changed: {PreviousState} -> {NewState}", previousState, newState);
 
             var args = new ConnectionStateChangedEventArgs(previousState, newState);
             ConnectionStateChanged?.Invoke(this, args);
@@ -376,7 +376,7 @@ namespace Nexum.Client
                 .GetAwaiter()
                 .GetResult();
 
-            Logger.Information("UDP socket bound on port {Port}", port);
+            Logger.Debug("UDP socket bound on port {Port}", port);
 
             channel.CloseCompletion.ContinueWith(_ =>
             {
@@ -389,7 +389,7 @@ namespace Nexum.Client
 
         internal void CloseUdp()
         {
-            Logger.Information("Closing UDP channel for {ServerType}", ServerType);
+            Logger.Debug("Closing UDP channel for {ServerType}", ServerType);
             bool wasEnabled = UdpEnabled;
             UdpEnabled = false;
             SelfUdpSocket = null;
@@ -404,6 +404,12 @@ namespace Nexum.Client
             UdpChannel = null;
             UdpEventLoopGroup?.ShutdownGracefullyAsync(TimeSpan.Zero, TimeSpan.Zero);
             UdpEventLoopGroup = null;
+
+            ServerUdpSocket = null;
+            ServerUdpLastReceivedTime = 0;
+            ServerUdpLastPing = 0;
+            ServerUdpRecentPing = 0;
+            ServerUdpJitter = 0;
 
             if (wasEnabled)
                 OnUdpDisconnected();
@@ -434,7 +440,7 @@ namespace Nexum.Client
             };
 
             ToServerReliableUdp.OnFailed += OnToServerReliableUdpFailed;
-            Logger.Information("Server reliable UDP initialized with firstFrameNumber = {FirstFrameNumber}",
+            Logger.Debug("Server reliable UDP initialized with firstFrameNumber = {FirstFrameNumber}",
                 firstFrameNumber);
         }
 
@@ -637,11 +643,16 @@ namespace Nexum.Client
             if (!UdpEnabled)
                 return;
 
+            bool wasEnabled = UdpEnabled;
             UdpEnabled = false;
 
             Task.Run(() =>
             {
                 CloseUdp();
+
+                if (wasEnabled)
+                    OnUdpDisconnected();
+
                 RmiToServer((ushort)NexumOpCode.NotifyUdpToTcpFallbackByClient, new NetMessage());
 
                 if (ServerUdpFallbackCount < ReliableUdpConfig.ServerUdpRepunchMaxTrialCount)

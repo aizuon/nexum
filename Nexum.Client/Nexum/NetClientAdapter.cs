@@ -24,7 +24,7 @@ namespace Nexum.Client
         {
             base.ChannelInactive(context);
             var remoteAddress = context.Channel.RemoteAddress;
-            _logger.Information("Client disconnected from {ServerType} at {RemoteAddress}",
+            _logger.Debug("Client disconnected from {ServerType} at {RemoteAddress}",
                 _owner.ServerType, ((IPEndPoint)remoteAddress).ToIPv4String());
 
             _owner.SetConnectionState(ConnectionState.Disconnected);
@@ -34,7 +34,7 @@ namespace Nexum.Client
         {
             base.ChannelActive(context);
             var remoteAddress = context.Channel.RemoteAddress;
-            _logger.Information("Client connected to {ServerType} at {RemoteAddress}",
+            _logger.Debug("Client connected to {ServerType} at {RemoteAddress}",
                 _owner.ServerType, ((IPEndPoint)remoteAddress).ToIPv4String());
 
             _owner.SetConnectionState(ConnectionState.Handshaking);

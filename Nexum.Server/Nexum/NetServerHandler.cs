@@ -642,8 +642,14 @@ namespace Nexum.Server
                         session.HostId, hostId, stateA.StateLock, stateB.StateLock, () =>
                         {
                             bool notify = stateA.HolepunchSuccess;
-                            stateA.HolepunchSuccess = false;
-                            stateB.HolepunchSuccess = false;
+                            stateA.HolepunchSuccess = stateB.HolepunchSuccess = false;
+                            stateA.PeerUdpHolepunchSuccess = stateB.PeerUdpHolepunchSuccess = false;
+                            stateA.JitTriggered = stateB.JitTriggered = false;
+                            stateA.NewConnectionSent = stateB.NewConnectionSent = false;
+                            stateA.EstablishSent = stateB.EstablishSent = false;
+                            stateA.RetryCount = stateB.RetryCount = 0;
+                            var now = DateTime.UtcNow;
+                            stateA.LastHolepunch = stateB.LastHolepunch = now;
                             return notify;
                         });
 
@@ -663,7 +669,7 @@ namespace Nexum.Server
                     session.Logger.Debug("NotifyUdpToTcpFallbackByClient => falling back to TCP relay");
                     lock (session.UdpHolepunchLock)
                     {
-                        session.UdpEnabled = false;
+                        session.ResetUdp();
                     }
 
                     server.UdpSessions.TryRemove(FilterTag.Create(session.HostId, (uint)HostId.Server), out _);
@@ -871,13 +877,9 @@ namespace Nexum.Server
                                 "C2S_RequestCreateUdpSocket => closing existing UDP connection");
                             server.UdpSessions.TryRemove(FilterTag.Create(session.HostId, (uint)HostId.Server),
                                 out _);
-                            session.UdpSessionInitialized = false;
                         }
 
-                        session.UdpEnabled = false;
-                        session.UdpEndPointInternal = null;
-                        session.UdpLocalEndPointInternal = null;
-                        session.ResetToClientReliableUdp();
+                        session.ResetUdp();
                     }
 
                     var udpSocket = server.GetRandomUdpSocket();

@@ -32,7 +32,7 @@ namespace Nexum.Server
             var memberToJoin = new P2PMember(HostId, session);
             if (P2PMembersInternal.TryAdd(session.HostId, memberToJoin))
             {
-                Server.Logger.Information(
+                session.Logger.Debug(
                     "Client({HostId}) joined P2PGroup({GroupHostId}), memberCount = {MemberCount}",
                     session.HostId, HostId, P2PMembersInternal.Count);
                 session.P2PGroup = this;
@@ -73,7 +73,7 @@ namespace Nexum.Server
                 {
                     if (member.Session.HostId == session.HostId)
                         continue;
-                    Server.Logger.Debug(
+                    member.Session.Logger.Debug(
                         "Notifying Client({ExistingHostId}) about new member Client({NewHostId}) in P2PGroup({GroupHostId})",
                         member.Session.HostId, session.HostId, HostId);
 
@@ -148,7 +148,7 @@ namespace Nexum.Server
         {
             if (P2PMembersInternal.TryRemove(session.HostId, out var memberToLeave))
             {
-                Server.Logger.Information(
+                session.Logger.Debug(
                     "Client({HostId}) left P2PGroup({GroupHostId}), memberCount = {MemberCount}",
                     session.HostId, HostId, P2PMembersInternal.Count);
 

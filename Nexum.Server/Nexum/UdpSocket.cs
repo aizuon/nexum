@@ -21,7 +21,7 @@ namespace Nexum.Server
         {
             Port = listenerPort;
             Channel = Listen(owner, udpAddress, Port);
-            Logger.Information("UDP socket bound on {Address}:{Port}", udpAddress, listenerPort);
+            Logger.Debug("UDP socket bound on {Address}:{Port}", udpAddress, listenerPort);
         }
 
         public static Action<IChannelPipeline> UdpPipelineConfigurator { get; set; }
@@ -50,7 +50,7 @@ namespace Nexum.Server
 
         public void Close()
         {
-            Logger.Information("Closing UDP socket on port {Port}", Port);
+            Logger.Debug("Closing UDP socket on port {Port}", Port);
             Channel?.CloseAsync();
             Channel = null;
             WorkerGroup?.ShutdownGracefullyAsync(TimeSpan.Zero, TimeSpan.Zero);

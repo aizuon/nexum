@@ -80,16 +80,21 @@ Nexum/
 │   │   └── UdpFrameEncoder.cs
 │   ├── Nexum/
 │   │   ├── AssembledPacket.cs
+│   │   ├── AssembledPacketError.cs
 │   │   ├── ByteArray.cs
 │   │   ├── CompressedFrameNumbers.cs
+│   │   ├── ConnectionStateChangedEventArgs.cs
 │   │   ├── Constants.cs
 │   │   ├── DefraggingPacket.cs
 │   │   ├── Enums.cs
+│   │   ├── Extensions.cs
 │   │   ├── FilterTag.cs
 │   │   ├── FragHeader.cs
 │   │   ├── FragmentConfig.cs
+│   │   ├── HolepunchConfig.cs
 │   │   ├── HolepunchHelper.cs
 │   │   ├── HostId.cs
+│   │   ├── MtuConfig.cs
 │   │   ├── MtuDiscovery.cs
 │   │   ├── NetConfig.cs
 │   │   ├── NetCore.cs
@@ -97,6 +102,7 @@ Nexum/
 │   │   ├── NetCrypt.cs
 │   │   ├── NetMessage.cs
 │   │   ├── NetSettings.cs
+│   │   ├── NetUtil.cs
 │   │   ├── NetZip.cs
 │   │   ├── ReliableUdpConfig.cs
 │   │   ├── ReliableUdpFrame.cs
@@ -104,11 +110,16 @@ Nexum/
 │   │   ├── ReliableUdpHost.cs
 │   │   ├── ReliableUdpReceiver.cs
 │   │   ├── ReliableUdpSender.cs
+│   │   ├── SessionConnectionStateChangedEventArgs.cs
 │   │   ├── StreamQueue.cs
 │   │   ├── SysUtil.cs
 │   │   ├── UdpMessage.cs
 │   │   ├── UdpPacketDefragBoard.cs
 │   │   └── UdpPacketFragBoard.cs
+│   ├── Simulation/
+│   │   ├── NetworkProfile.cs
+│   │   ├── NetworkSimulation.cs
+│   │   └── SimulatedUdpChannelHandler.cs
 │   └── RSAHelper.cs
 ├── Nexum.Client/                   # Client-side implementation
 │   └── Nexum/
@@ -136,22 +147,39 @@ Nexum/
 │       └── UdpSocket.cs
 ├── Nexum.Tests/                    # Unit and integration tests
 │   ├── Integration/
+│   │   ├── ConnectionStateTests.cs
 │   │   ├── ConnectionTests.cs
 │   │   ├── EdgeCaseTests.cs
 │   │   ├── IntegrationTestBase.cs
+│   │   ├── IntegrationTestCollection.cs
 │   │   ├── KeyExchangeTests.cs
 │   │   ├── MtuDiscoveryTests.cs
 │   │   ├── P2PConnectionTests.cs
 │   │   ├── ReliableUdpTests.cs
 │   │   ├── UdpConnectionTests.cs
-│   │   └── UdpFragmentationTests.cs
+│   │   ├── UdpFragmentationTests.cs
+│   │   └── UdpReconnectionTests.cs
 │   ├── ByteArrayTests.cs
 │   ├── NetCryptTests.cs
 │   ├── NetMessageTests.cs
 │   └── NetZipTests.cs
-├── TestClient/                     # Example client application
+├── Nexum.Tests.E2E/                # End-to-end AWS tests
+│   ├── Orchestration/
+│   │   ├── Ec2Orchestrator.cs
+│   │   ├── IamProvisioner.cs
+│   │   ├── S3Deployer.cs
+│   │   └── SsmCommandRunner.cs
+│   ├── AwsConfig.cs
+│   └── CoreFeaturesE2ETest.cs
+├── Nexum.E2E.Client/               # E2E test client application
 │   └── Program.cs
-└── TestServer/                     # Example server application
+├── Nexum.E2E.Server/               # E2E test server application
+│   └── Program.cs
+├── Nexum.E2E.Common/               # Shared E2E constants
+│   └── E2EConstants.cs
+├── ExampleClient/                  # Example client application
+│   └── Program.cs
+└── ExampleServer/                  # Example server application
     └── Program.cs
 ```
 

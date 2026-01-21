@@ -50,7 +50,7 @@ namespace Nexum.Core.DotNetty.Codecs
                 PacketId = packetId,
                 FragmentId = fragmentId,
                 Content = buffer,
-                EndPoint = new IPEndPoint(endPoint.Address.MapToIPv4(), endPoint.Port)
+                EndPoint = endPoint.ToIPv4EndPoint()
             });
         }
     }

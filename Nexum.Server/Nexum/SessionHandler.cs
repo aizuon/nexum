@@ -31,7 +31,7 @@ namespace Nexum.Server
 
             session.SetConnectionState(ConnectionState.Handshaking);
 
-            session.Logger.Information(
+            session.Logger.Debug(
                 "New incoming client({HostId}) => {EndPoint}, total sessions = {SessionCount}",
                 hostId, session.RemoteEndPoint, Owner.Sessions.Count);
 
@@ -84,7 +84,7 @@ namespace Nexum.Server
             Owner.SessionsInternal.TryRemove(session.HostId, out _);
             Owner.HostIdFactory.Free(session.HostId);
 
-            session.Logger.Information(
+            session.Logger.Debug(
                 "Client({HostId}) disconnected, remaining sessions = {SessionCount}",
                 session.HostId, Owner.Sessions.Count);
 
@@ -104,7 +104,7 @@ namespace Nexum.Server
             if (evt is IdleStateEvent idleEvent && idleEvent.State == IdleState.AllIdle)
             {
                 var session = context.Channel.GetAttribute(ChannelAttributes.Session).Get();
-                session?.Logger.Information("Session timed out due to inactivity ({IdleTimeout}s), closing connection",
+                session?.Logger.Debug("Session timed out due to inactivity ({IdleTimeout}s), closing connection",
                     Owner.NetSettings.IdleTimeout);
                 context.CloseAsync();
                 return;

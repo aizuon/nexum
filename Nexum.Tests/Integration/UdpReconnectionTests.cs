@@ -52,14 +52,15 @@ namespace Nexum.Tests.Integration
             var initialUdpChannel = client.UdpChannel;
             Assert.NotNull(initialUdpChannel);
 
+            var clientFallbackDetected = new ManualResetEventSlim(false);
+            client.OnUdpDisconnected += () => { clientFallbackDetected.Set(); };
+
             Output.WriteLine($"[{profileName}] Closing client UDP channel to simulate connection death...");
             await client.UdpChannel.CloseAsync();
 
             Output.WriteLine($"[{profileName}] Waiting for client to detect UDP timeout..");
 
-            bool clientDetectedTimeout = await WaitForConditionAsync(
-                () => !client.UdpEnabled,
-                GetAdjustedTimeout(UdpTimeoutWait));
+            bool clientDetectedTimeout = clientFallbackDetected.Wait(GetAdjustedTimeout(UdpTimeoutWait));
 
             Assert.True(clientDetectedTimeout, $"[{profileName}] Client should detect UDP timeout");
             Output.WriteLine($"[{profileName}] Client detected timeout and initiated fallback");
@@ -133,14 +134,19 @@ namespace Nexum.Tests.Integration
             Assert.True(peer1.DirectP2P, $"[{profileName}] Peer1 should have direct P2P");
             Assert.True(peer2.DirectP2P, $"[{profileName}] Peer2 should have direct P2P");
 
+            var peer1FallbackDetected = new ManualResetEventSlim(false);
+            client1.OnP2PMemberDirectDisconnected += hostId =>
+            {
+                if (hostId == client2.HostId)
+                    peer1FallbackDetected.Set();
+            };
+
             Output.WriteLine($"[{profileName}] Closing peer2's P2P UDP channel to simulate connection death...");
             await peer2.PeerUdpChannel.CloseAsync();
 
             Output.WriteLine($"[{profileName}] Waiting for peer1 to detect P2P UDP timeout...");
 
-            bool peer1DetectedTimeout = await WaitForConditionAsync(
-                () => !peer1.DirectP2P,
-                GetAdjustedTimeout(UdpTimeoutWait));
+            bool peer1DetectedTimeout = peer1FallbackDetected.Wait(GetAdjustedTimeout(UdpTimeoutWait));
 
             Assert.True(peer1DetectedTimeout,
                 $"[{profileName}] Peer1 should detect P2P timeout and fall back to relay");

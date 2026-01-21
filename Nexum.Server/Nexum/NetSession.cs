@@ -2,6 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net;
+using BaseLib.Extensions;
 using DotNetty.Buffers;
 using DotNetty.Transport.Channels;
 using DotNetty.Transport.Channels.Sockets;
@@ -30,17 +31,17 @@ namespace Nexum.Server
             HostId = hostId;
             Channel = (ISocketChannel)channel;
             var remoteEndPoint = (IPEndPoint)Channel.RemoteAddress;
-            RemoteEndPoint = new IPEndPoint(remoteEndPoint.Address.MapToIPv4(), remoteEndPoint.Port);
+            RemoteEndPoint = remoteEndPoint.ToIPv4EndPoint();
 
             var localEndPoint = (IPEndPoint)Channel.LocalAddress;
-            LocalEndPoint = new IPEndPoint(localEndPoint.Address.MapToIPv4(), localEndPoint.Port);
+            LocalEndPoint = localEndPoint.ToIPv4EndPoint();
 
             UdpDefragBoard = new UdpPacketDefragBoard { LocalHostId = (uint)Core.HostId.Server };
 
             UdpFragBoard.DefragBoard = UdpDefragBoard;
 
             Logger = Log.ForContext("HostId", HostId).ForContext("EndPoint", RemoteEndPoint.Address.ToString())
-                .ForContext(Constants.SourceContextPropertyName, server.ServerType + "Session");
+                .ForContext(Constants.SourceContextPropertyName, $"{server.ServerType}Session({HostId})");
         }
 
         public uint HostId { get; }
@@ -126,7 +127,7 @@ namespace Nexum.Server
         {
             IsDisposed = true;
             SetConnectionState(ConnectionState.Disconnected);
-            Logger.Information("Session disposed for hostId = {HostId}", HostId);
+            Logger.Debug("Session disposed for hostId = {HostId}", HostId);
             P2PGroup?.Leave(this);
 
             if (ToClientReliableUdp != null)
@@ -243,7 +244,7 @@ namespace Nexum.Server
                 _connectionState = newState;
             }
 
-            Logger.Information("Connection state changed: {PreviousState} -> {NewState}", previousState, newState);
+            Logger.Debug("Connection state changed: {PreviousState} -> {NewState}", previousState, newState);
 
             var args = new ConnectionStateChangedEventArgs(previousState, newState);
             ConnectionStateChanged?.Invoke(this, args);
@@ -265,7 +266,7 @@ namespace Nexum.Server
             };
 
             ToClientReliableUdp.OnFailed += OnToClientReliableUdpFailed;
-            Logger.Information("Client reliable UDP initialized with firstFrameNumber = {FirstFrameNumber}",
+            Logger.Debug("Client reliable UDP initialized with firstFrameNumber = {FirstFrameNumber}",
                 firstFrameNumber);
         }
 
@@ -276,6 +277,18 @@ namespace Nexum.Server
                 ToClientReliableUdp.OnFailed -= OnToClientReliableUdpFailed;
                 ToClientReliableUdp = null;
             }
+        }
+
+        internal void ResetUdp()
+        {
+            UdpEnabled = false;
+            UdpSessionInitialized = false;
+            UdpEndPointInternal = null;
+            UdpLocalEndPointInternal = null;
+            ClientUdpLastPing = 0;
+            ClientUdpRecentPing = 0;
+            ClientUdpJitter = 0;
+            ResetToClientReliableUdp();
         }
 
         internal void ReliableUdpFrameMove(double elapsedTime)
@@ -323,10 +336,7 @@ namespace Nexum.Server
             Logger.Warning(
                 "ToClientReliableUdp failed after max retries, falling back to TCP - retry will be triggered by server");
 
-            ToClientReliableUdp.OnFailed -= OnToClientReliableUdpFailed;
-            ToClientReliableUdp = null;
-
-            UdpEnabled = false;
+            ResetUdp();
 
             RmiToClient((ushort)NexumOpCode.NotifyUdpToTcpFallbackByServer, new NetMessage());
         }

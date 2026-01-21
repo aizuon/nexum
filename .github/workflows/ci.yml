@@ -5,8 +5,8 @@ on:
     branches: [main]
 
 jobs:
-  build:
-    name: Build
+  build-and-unit-tests:
+    name: Build and Unit Tests
     runs-on: ubuntu-latest
 
     steps:
@@ -23,34 +23,6 @@ jobs:
 
       - name: Build
         run: dotnet build Nexum.sln --configuration Release --no-restore
-
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-output
-          path: |
-            **/bin/Release/
-            **/obj/Release/
-          retention-days: 1
-
-  unit-tests:
-    name: Unit Tests
-    runs-on: ubuntu-latest
-    needs: build
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: "10.0.x"
-
-      - name: Download build artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: build-output
 
       - name: Run Unit Tests
         run: |
@@ -70,10 +42,20 @@ jobs:
           path: ./TestResults/*.trx
           retention-days: 7
 
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-output
+          path: |
+            **/bin/Release/
+            **/obj/Release/
+          retention-days: 1
+
   integration-tests:
     name: Integration Tests
     runs-on: ubuntu-latest
-    needs: unit-tests
+    needs: build-and-unit-tests
+    timeout-minutes: 15
 
     steps:
       - name: Checkout repository
@@ -110,7 +92,14 @@ jobs:
   e2e-tests-aws:
     name: E2E Tests (AWS)
     runs-on: ubuntu-latest
+    needs: build-and-unit-tests
     timeout-minutes: 15
+    concurrency:
+      group: e2e-aws
+      cancel-in-progress: false
+    permissions:
+      id-token: write
+      contents: read
 
     steps:
       - name: Checkout repository
@@ -142,19 +131,20 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ secrets.AWS_REGION }}
 
       - name: Create S3 bucket if not exists
+        env:
+          AWS_REGION: ${{ secrets.AWS_REGION }}
         run: |
           if aws s3api head-bucket --bucket nexum-e2e-artifacts 2>/dev/null; then
             echo "Bucket already exists"
-          elif [ "${{ secrets.AWS_REGION }}" = "us-east-1" ]; then
+          elif [ "$AWS_REGION" = "us-east-1" ]; then
             aws s3api create-bucket --bucket nexum-e2e-artifacts --region us-east-1
           else
-            aws s3api create-bucket --bucket nexum-e2e-artifacts --region ${{ secrets.AWS_REGION }} \
-              --create-bucket-configuration LocationConstraint=${{ secrets.AWS_REGION }}
+            aws s3api create-bucket --bucket nexum-e2e-artifacts --region "$AWS_REGION" \
+              --create-bucket-configuration LocationConstraint="$AWS_REGION"
           fi
 
       - name: Upload E2E binaries to S3
