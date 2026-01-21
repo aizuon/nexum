@@ -18,6 +18,9 @@ namespace Nexum.Server
 
         private readonly Stopwatch _stopwatch = Stopwatch.StartNew();
 
+        internal readonly ConcurrentDictionary<uint, int> LastSuccessfulP2PLocalPorts =
+            new ConcurrentDictionary<uint, int>();
+
         internal readonly ConcurrentQueue<PendingPeerHolepunchRequest> PendingPeerHolepunchRequests =
             new ConcurrentQueue<PendingPeerHolepunchRequest>();
 
@@ -102,8 +105,6 @@ namespace Nexum.Server
 
         internal UdpSocket UdpSocket { get; set; }
 
-        internal int LastP2PLocalPort { get; set; }
-
         internal IPEndPoint UdpEndPointInternal
         {
             set => UdpEndPoint = value;
@@ -176,7 +177,7 @@ namespace Nexum.Server
 
                 if (data.Compress)
                     data = NetZip.CompressPacket(data);
-                if (data.Encrypt)
+                if (data.Encrypt && Crypt != null)
                     data = Crypt.CreateEncryptedMessage(data);
 
                 var message = new NetMessage();
@@ -212,7 +213,7 @@ namespace Nexum.Server
                 data.Reliable = reliable;
                 if (data.Compress)
                     data = NetZip.CompressPacket(data);
-                if (data.Encrypt)
+                if (data.Encrypt && Crypt != null)
                     data = Crypt.CreateEncryptedMessage(data);
 
                 if (UdpEnabled || force)

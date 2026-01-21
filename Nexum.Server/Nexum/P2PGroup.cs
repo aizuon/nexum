@@ -50,7 +50,7 @@ namespace Nexum.Server
                     p2pGroupMemberJoin.Write(memberToJoin.P2PFirstFrameNumber);
                     p2pGroupMemberJoin.Write(memberToJoin.ConnectionMagicNumber);
                     p2pGroupMemberJoin.Write(Server.AllowDirectP2P);
-                    p2pGroupMemberJoin.Write(session.LastP2PLocalPort);
+                    p2pGroupMemberJoin.Write(session.UdpLocalEndPoint?.Port ?? 0);
 
                     session.RmiToClient((ushort)NexumOpCode.P2PGroup_MemberJoin, p2pGroupMemberJoin);
                 }
@@ -64,7 +64,7 @@ namespace Nexum.Server
                     p2pGroupMemberJoin.Write(memberToJoin.P2PFirstFrameNumber);
                     p2pGroupMemberJoin.Write(memberToJoin.ConnectionMagicNumber);
                     p2pGroupMemberJoin.Write(Server.AllowDirectP2P);
-                    p2pGroupMemberJoin.Write(session.LastP2PLocalPort);
+                    p2pGroupMemberJoin.Write(session.UdpLocalEndPoint?.Port ?? 0);
 
                     session.RmiToClient((ushort)NexumOpCode.P2PGroup_MemberJoin_Unencrypted, p2pGroupMemberJoin);
                 }
@@ -81,9 +81,15 @@ namespace Nexum.Server
                     int existingPortForJoiner = 0;
                     if (member.ConnectionStates.TryGetValue(session.HostId, out var existingStateForMember))
                         existingPortForMember = existingStateForMember.LastSuccessfulLocalPort;
+                    else if (member.Session.LastSuccessfulP2PLocalPorts.TryGetValue(session.HostId,
+                                 out int preservedPortForMember))
+                        existingPortForMember = preservedPortForMember;
                     if (memberToJoin.ConnectionStates.TryGetValue(member.Session.HostId,
                             out var existingStateForJoiner))
                         existingPortForJoiner = existingStateForJoiner.LastSuccessfulLocalPort;
+                    else if (session.LastSuccessfulP2PLocalPorts.TryGetValue(member.Session.HostId,
+                                 out int preservedPortForJoiner))
+                        existingPortForJoiner = preservedPortForJoiner;
 
                     var stateA = new P2PConnectionState(member) { LastSuccessfulLocalPort = existingPortForJoiner };
                     var stateB = new P2PConnectionState(memberToJoin)
@@ -91,14 +97,12 @@ namespace Nexum.Server
 
                     int bindPortForMember = existingPortForMember > 0
                         ? existingPortForMember
-                        : member.Session.LastP2PLocalPort > 0
-                            ? member.Session.LastP2PLocalPort
-                            : member.Session.UdpLocalEndPoint?.Port ?? 0;
+                        : GetAnyActiveP2PLocalPort(member)
+                          ?? member.Session.UdpLocalEndPoint?.Port ?? 0;
                     int bindPortForJoiner = existingPortForJoiner > 0
                         ? existingPortForJoiner
-                        : session.LastP2PLocalPort > 0
-                            ? session.LastP2PLocalPort
-                            : session.UdpLocalEndPoint?.Port ?? 0;
+                        : GetAnyActiveP2PLocalPort(memberToJoin)
+                          ?? session.UdpLocalEndPoint?.Port ?? 0;
 
                     memberToJoin.ConnectionStates[member.Session.HostId] = stateA;
                     member.ConnectionStates[session.HostId] = stateB;
@@ -199,9 +203,21 @@ namespace Nexum.Server
 
                     session.RmiToClient((ushort)NexumOpCode.P2PGroup_MemberLeave, p2pGroupMemberLeave3);
 
-                    member.ConnectionStates.TryRemove(session.HostId, out _);
+                    if (member.ConnectionStates.TryRemove(session.HostId, out var removedState) &&
+                        removedState.LastSuccessfulLocalPort > 0)
+                        member.Session.LastSuccessfulP2PLocalPorts[session.HostId] =
+                            removedState.LastSuccessfulLocalPort;
                 }
             }
+        }
+
+        private static int? GetAnyActiveP2PLocalPort(P2PMember member)
+        {
+            foreach (var state in member.ConnectionStates.Values)
+                if (state.HolepunchSuccess && state.LocalEndPoint?.Port > 0)
+                    return state.LocalEndPoint.Port;
+
+            return null;
         }
     }
 }

@@ -289,7 +289,7 @@ namespace Nexum.Client
 
                 if (client.SelfUdpSocket != null)
                 {
-                    client.Logger.Debug("ServerHolepunchAck => SelfUdpSocket already set, ignoring duplicate");
+                    client.Logger.Verbose("ServerHolepunchAck => SelfUdpSocket already set, ignoring duplicate");
                     return;
                 }
 
@@ -438,7 +438,7 @@ namespace Nexum.Client
                     if (p2pMember.PeerUdpChannel != null)
                     {
                         port = ((IPEndPoint)p2pMember.PeerUdpChannel.LocalAddress).Port;
-                        client.Logger.Debug(
+                        client.Logger.Verbose(
                             "PeerUdpServerHolepunchAck => reusing existing P2P UDP socket on port {Port}", port);
                     }
                     else
@@ -500,7 +500,7 @@ namespace Nexum.Client
 
                 if (p2pMember.IsClosed || p2pMember.DirectP2P)
                 {
-                    client.Logger.Debug(
+                    client.Logger.Verbose(
                         "PeerUdpPeerHolepunch => skipping for hostId = {HostId}, IsClosed = {IsClosed}, DirectP2P = {DirectP2P}",
                         hostId, p2pMember.IsClosed, p2pMember.DirectP2P);
                     return;
@@ -630,7 +630,7 @@ namespace Nexum.Client
 
                 if (p2pMember.P2PHolepunchNotified)
                 {
-                    client.Logger.Debug("PeerUdpPeerHolepunchAck => already notified for hostId = {HostId}", hostId);
+                    client.Logger.Verbose("PeerUdpPeerHolepunchAck => already notified for hostId = {HostId}", hostId);
                     return;
                 }
 
@@ -808,7 +808,7 @@ namespace Nexum.Client
 
                 if (!enableDirectP2P)
                 {
-                    client.Logger.Debug(
+                    client.Logger.Verbose(
                         "ProcessP2PGroupMemberJoin => skipping P2P UDP socket creation for hostId = {HostId}, enableDirectP2P = false",
                         memberId);
                     client.P2PGroup.P2PMembersInternal.TryAdd(memberId, newMember);
@@ -971,7 +971,7 @@ namespace Nexum.Client
 
                     if (client.UdpChannel != null)
                     {
-                        client.Logger.Debug("S2C_RequestCreateUdpSocket => UDP socket already exists, sending ack");
+                        client.Logger.Verbose("S2C_RequestCreateUdpSocket => UDP socket already exists, sending ack");
                         var createUdpSocketAck = new NetMessage();
                         createUdpSocketAck.Write(true);
                         client.RmiToServer((ushort)NexumOpCode.C2S_CreateUdpSocketAck, createUdpSocketAck);
@@ -1114,7 +1114,7 @@ namespace Nexum.Client
                     {
                         if (targetMember.P2PHolepunchInitiated)
                         {
-                            client.Logger.Debug(
+                            client.Logger.Verbose(
                                 "NewDirectP2PConnection => hostId = {HostId}, skipping - holepunch already in progress",
                                 hostId);
                             return;
@@ -1167,7 +1167,7 @@ namespace Nexum.Client
                     {
                         if (p2pMember.P2PHolepunchStarted || p2pMember.DirectP2P)
                         {
-                            client.Logger.Debug(
+                            client.Logger.Verbose(
                                 "RequestP2PHolepunch => skipping for hostId = {HostId}, P2PHolepunchStarted = {Started}, DirectP2P = {DirectP2P}",
                                 hostId, p2pMember.P2PHolepunchStarted, p2pMember.DirectP2P);
                             break;
@@ -1271,7 +1271,7 @@ namespace Nexum.Client
                         {
                             if (p2pMember.DirectP2P)
                             {
-                                client.Logger.Debug(
+                                client.Logger.Verbose(
                                     "NotifyDirectP2PEstablish => already established with hostId = {HostId}", hostIdB);
                                 return;
                             }
@@ -1466,7 +1466,7 @@ namespace Nexum.Client
                         return;
                     }
 
-                    client.Logger.Debug("Certificate pinning validation successful");
+                    client.Logger.Verbose("Certificate pinning validation successful");
                 }
 
                 var rsaSequence = (DerSequence)Asn1Object.FromByteArray(encodedRsaKey);

@@ -359,7 +359,7 @@ namespace Nexum.Server
 
                 if (session.UdpEnabled)
                 {
-                    session.Logger.Debug("ServerHolepunch => UDP already enabled, ignoring duplicate");
+                    session.Logger.Verbose("ServerHolepunch => UDP already enabled, ignoring duplicate");
                     return;
                 }
 
@@ -407,7 +407,7 @@ namespace Nexum.Server
 
                 if (session.UdpEnabled)
                 {
-                    session.Logger.Debug("NotifyHolepunchSuccess => UDP already enabled, ignoring duplicate");
+                    session.Logger.Verbose("NotifyHolepunchSuccess => UDP already enabled, ignoring duplicate");
                     return;
                 }
 
@@ -762,20 +762,18 @@ namespace Nexum.Server
                         "NotifyP2PHolepunchSuccess => hostIdA = {HostIdA}, hostIdB = {HostIdB}, endpointA = {EndpointA}, endpointB = {EndpointB}, endpointC = {EndpointC}, endpointD = {EndpointD}",
                         hostIdA, hostIdB, endpointA, endpointB, endpointC, endpointD);
 
-                    session.LastP2PLocalPort = endpointD.Port;
-
                     bool shouldSendEstablish = HolepunchHelper.WithOrderedLocks(
                         hostIdA, hostIdB, stateA.StateLock, stateB.StateLock, () =>
                         {
                             if (session.HostId == peerA.Session.HostId)
                             {
                                 stateA.HolepunchSuccess = true;
-                                stateA.LastSuccessfulLocalPort = endpointD.Port;
+                                stateA.LastSuccessfulLocalPort = stateA.LocalEndPoint?.Port ?? 0;
                             }
                             else
                             {
                                 stateB.HolepunchSuccess = true;
-                                stateB.LastSuccessfulLocalPort = endpointD.Port;
+                                stateB.LastSuccessfulLocalPort = stateB.LocalEndPoint?.Port ?? 0;
                             }
 
                             bool canSend = (stateA.HolepunchSuccess || stateB.HolepunchSuccess) &&
@@ -918,9 +916,8 @@ namespace Nexum.Server
                         return;
                     }
 
-                    session.Logger.Debug("C2S_CreateUdpSocketAck => hostId = {HostId}", session.HostId);
-                    session.Logger.Debug("C2S_CreateUdpSocketAck => requesting holepunch with guid = {MagicNumber}",
-                        session.HolepunchMagicNumber);
+                    session.Logger.Debug("C2S_CreateUdpSocketAck => hostId = {HostId}, guid = {MagicNumber}",
+                        session.HostId, session.HolepunchMagicNumber);
 
                     var requestStartHolepunch = new NetMessage();
                     requestStartHolepunch.WriteEnum(MessageType.RequestStartServerHolepunch);

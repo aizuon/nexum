@@ -173,7 +173,7 @@ namespace Nexum.Client
                 throw new ArgumentNullException(nameof(derEncodedKey));
 
             PinnedServerPublicKey = derEncodedKey;
-            Logger.Debug("Server public key pinned for certificate validation");
+            Logger.Verbose("Server public key pinned for certificate validation");
         }
 
         public void SetPinnedServerPublicKey(string base64Key)
@@ -182,13 +182,13 @@ namespace Nexum.Client
                 throw new ArgumentNullException(nameof(base64Key));
 
             PinnedServerPublicKey = Convert.FromBase64String(base64Key);
-            Logger.Debug("Server public key pinned for certificate validation");
+            Logger.Verbose("Server public key pinned for certificate validation");
         }
 
         public void ClearPinnedServerPublicKey()
         {
             PinnedServerPublicKey = null;
-            Logger.Debug("Server public key pinning disabled");
+            Logger.Verbose("Server public key pinning disabled");
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -296,7 +296,6 @@ namespace Nexum.Client
             P2PGroup?.P2PMembersInternal.Clear();
             P2PGroup = null;
 
-            // Clean up all recycled sockets
             foreach (var recycled in RecycledSockets.Values)
                 GarbageSocket(recycled);
             RecycledSockets.Clear();
@@ -587,7 +586,7 @@ namespace Nexum.Client
             {
                 if (data.Compress)
                     data = NetZip.CompressPacket(data);
-                if (data.Encrypt)
+                if (data.Encrypt && Crypt != null)
                     data = Crypt.CreateEncryptedMessage(data);
 
                 var message = new NetMessage();
@@ -605,7 +604,7 @@ namespace Nexum.Client
                 data.Reliable = reliable;
                 if (data.Compress)
                     data = NetZip.CompressPacket(data);
-                if (data.Encrypt)
+                if (data.Encrypt && Crypt != null)
                     data = Crypt.CreateEncryptedMessage(data);
 
                 if ((UdpEnabled || force) && UdpChannel != null && ServerUdpSocket != null)

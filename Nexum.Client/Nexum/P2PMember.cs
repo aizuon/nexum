@@ -302,8 +302,6 @@ namespace Nexum.Client
                 ToPeerReliableUdp = null;
             }
 
-            // Recycle the socket if this was a successful P2P connection (not relayed)
-            // This preserves NAT mappings for future connections
             if (shouldRecycleSocket && wasDirectP2P && PeerUdpChannel != null && PeerUdpChannel.Active && localPort > 0)
             {
                 Logger.Debug("Recycling P2P UDP socket on port {Port} for hostId = {HostId}", localPort, HostId);
@@ -313,7 +311,6 @@ namespace Nexum.Client
             }
             else
             {
-                // Socket was relayed or failed - garbage it
                 PeerUdpChannel?.CloseAsync();
                 PeerUdpChannel = null;
                 PeerUdpEventLoopGroup?.ShutdownGracefullyAsync(TimeSpan.Zero, TimeSpan.Zero);

@@ -331,7 +331,7 @@ namespace Nexum.Tests.Integration
 
             var peerMessage2 = new NetMessage();
             peerMessage2.Write(666);
-            peer2.RmiToPeer(7006, peerMessage2, EncryptMode.Fast, reliable: true);
+            peer2.RmiToPeer(7006, peerMessage2, reliable: true);
 
             Assert.True(client2Done.Wait(GetAdjustedTimeout(ConnectionTimeout)),
                 "Client2 should receive encrypted P2P message");
