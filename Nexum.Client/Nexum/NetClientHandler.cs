@@ -825,8 +825,6 @@ namespace Nexum.Client
                 else
                 {
                     int? targetPort = bindPort > 0 ? bindPort : null;
-                    if (targetPort.HasValue)
-                        client.AimForPort = (ushort)targetPort.Value;
 
                     client.P2PGroup.P2PMembersInternal.TryAdd(memberId, newMember);
                     client.OnP2PMemberJoin(memberId);
@@ -927,7 +925,7 @@ namespace Nexum.Client
                                 client.OnP2PMemberDirectDisconnected(memberId);
                             else
                                 client.OnP2PMemberRelayDisconnected(memberId);
-                            p2pMember.Close();
+                            p2pMember.Close(p2pMember.DirectP2P);
                         }
 
                         client.OnP2PMemberLeave(memberId);
@@ -1321,7 +1319,7 @@ namespace Nexum.Client
 
                         lock (p2pMember.P2PMutex)
                         {
-                            p2pMember.Close();
+                            p2pMember.Close(p2pMember.DirectP2P);
                             p2pMember.IsClosed = false;
                         }
 

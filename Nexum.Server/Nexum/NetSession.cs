@@ -102,6 +102,8 @@ namespace Nexum.Server
 
         internal UdpSocket UdpSocket { get; set; }
 
+        internal int LastP2PLocalPort { get; set; }
+
         internal IPEndPoint UdpEndPointInternal
         {
             set => UdpEndPoint = value;

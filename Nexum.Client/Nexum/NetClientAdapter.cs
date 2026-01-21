@@ -17,7 +17,8 @@ namespace Nexum.Client
         internal NetClientAdapter(NetClient owner)
         {
             _owner = owner;
-            _logger = Log.ForContext(Constants.SourceContextPropertyName, owner.ServerType + "ClientAdapter");
+            _logger = Log.ForContext(Constants.SourceContextPropertyName,
+                $"{owner.ServerType}ClientAdapter");
         }
 
         public override void ChannelInactive(IChannelHandlerContext context)

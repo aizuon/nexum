@@ -19,7 +19,7 @@ namespace Nexum.Server
         public SessionHandler(NetServer owner)
         {
             Owner = owner;
-            Logger = Log.ForContext(Constants.SourceContextPropertyName, owner.ServerType + "SessionHandler");
+            Logger = Log.ForContext(Constants.SourceContextPropertyName, $"{owner.ServerType}{nameof(SessionHandler)}");
         }
 
         public override void ChannelActive(IChannelHandlerContext context)

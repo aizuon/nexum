@@ -50,7 +50,7 @@ namespace Nexum.Server
                     p2pGroupMemberJoin.Write(memberToJoin.P2PFirstFrameNumber);
                     p2pGroupMemberJoin.Write(memberToJoin.ConnectionMagicNumber);
                     p2pGroupMemberJoin.Write(Server.AllowDirectP2P);
-                    p2pGroupMemberJoin.Write(session.UdpEndPoint?.Port ?? 0);
+                    p2pGroupMemberJoin.Write(session.LastP2PLocalPort);
 
                     session.RmiToClient((ushort)NexumOpCode.P2PGroup_MemberJoin, p2pGroupMemberJoin);
                 }
@@ -64,7 +64,7 @@ namespace Nexum.Server
                     p2pGroupMemberJoin.Write(memberToJoin.P2PFirstFrameNumber);
                     p2pGroupMemberJoin.Write(memberToJoin.ConnectionMagicNumber);
                     p2pGroupMemberJoin.Write(Server.AllowDirectP2P);
-                    p2pGroupMemberJoin.Write(session.UdpEndPoint?.Port ?? 0);
+                    p2pGroupMemberJoin.Write(session.LastP2PLocalPort);
 
                     session.RmiToClient((ushort)NexumOpCode.P2PGroup_MemberJoin_Unencrypted, p2pGroupMemberJoin);
                 }
@@ -77,8 +77,28 @@ namespace Nexum.Server
                         "Notifying Client({ExistingHostId}) about new member Client({NewHostId}) in P2PGroup({GroupHostId})",
                         member.Session.HostId, session.HostId, HostId);
 
-                    var stateA = new P2PConnectionState(member);
-                    var stateB = new P2PConnectionState(memberToJoin);
+                    int existingPortForMember = 0;
+                    int existingPortForJoiner = 0;
+                    if (member.ConnectionStates.TryGetValue(session.HostId, out var existingStateForMember))
+                        existingPortForMember = existingStateForMember.LastSuccessfulLocalPort;
+                    if (memberToJoin.ConnectionStates.TryGetValue(member.Session.HostId,
+                            out var existingStateForJoiner))
+                        existingPortForJoiner = existingStateForJoiner.LastSuccessfulLocalPort;
+
+                    var stateA = new P2PConnectionState(member) { LastSuccessfulLocalPort = existingPortForJoiner };
+                    var stateB = new P2PConnectionState(memberToJoin)
+                        { LastSuccessfulLocalPort = existingPortForMember };
+
+                    int bindPortForMember = existingPortForMember > 0
+                        ? existingPortForMember
+                        : member.Session.LastP2PLocalPort > 0
+                            ? member.Session.LastP2PLocalPort
+                            : member.Session.UdpLocalEndPoint?.Port ?? 0;
+                    int bindPortForJoiner = existingPortForJoiner > 0
+                        ? existingPortForJoiner
+                        : session.LastP2PLocalPort > 0
+                            ? session.LastP2PLocalPort
+                            : session.UdpLocalEndPoint?.Port ?? 0;
 
                     memberToJoin.ConnectionStates[member.Session.HostId] = stateA;
                     member.ConnectionStates[session.HostId] = stateB;
@@ -95,7 +115,7 @@ namespace Nexum.Server
                         p2pGroupMemberJoin1.Write(memberToJoin.P2PFirstFrameNumber);
                         p2pGroupMemberJoin1.Write(memberToJoin.ConnectionMagicNumber);
                         p2pGroupMemberJoin1.Write(Server.AllowDirectP2P);
-                        p2pGroupMemberJoin1.Write(session.UdpEndPoint?.Port ?? 0);
+                        p2pGroupMemberJoin1.Write(bindPortForMember);
 
                         member.Session.RmiToClient((ushort)NexumOpCode.P2PGroup_MemberJoin, p2pGroupMemberJoin1);
 
@@ -109,7 +129,7 @@ namespace Nexum.Server
                         p2pGroupMemberJoin2.Write(member.P2PFirstFrameNumber);
                         p2pGroupMemberJoin2.Write(member.ConnectionMagicNumber);
                         p2pGroupMemberJoin2.Write(Server.AllowDirectP2P);
-                        p2pGroupMemberJoin2.Write(member.Session.UdpEndPoint?.Port ?? 0);
+                        p2pGroupMemberJoin2.Write(bindPortForJoiner);
 
                         session.RmiToClient((ushort)NexumOpCode.P2PGroup_MemberJoin, p2pGroupMemberJoin2);
                     }
@@ -123,7 +143,7 @@ namespace Nexum.Server
                         p2pGroupMemberJoin1.Write(memberToJoin.P2PFirstFrameNumber);
                         p2pGroupMemberJoin1.Write(memberToJoin.ConnectionMagicNumber);
                         p2pGroupMemberJoin1.Write(Server.AllowDirectP2P);
-                        p2pGroupMemberJoin1.Write(session.UdpEndPoint?.Port ?? 0);
+                        p2pGroupMemberJoin1.Write(bindPortForMember);
 
                         member.Session.RmiToClient((ushort)NexumOpCode.P2PGroup_MemberJoin_Unencrypted,
                             p2pGroupMemberJoin1);
@@ -136,7 +156,7 @@ namespace Nexum.Server
                         p2pGroupMemberJoin2.Write(member.P2PFirstFrameNumber);
                         p2pGroupMemberJoin2.Write(member.ConnectionMagicNumber);
                         p2pGroupMemberJoin2.Write(Server.AllowDirectP2P);
-                        p2pGroupMemberJoin2.Write(member.Session.UdpEndPoint?.Port ?? 0);
+                        p2pGroupMemberJoin2.Write(bindPortForJoiner);
 
                         session.RmiToClient((ushort)NexumOpCode.P2PGroup_MemberJoin_Unencrypted, p2pGroupMemberJoin2);
                     }

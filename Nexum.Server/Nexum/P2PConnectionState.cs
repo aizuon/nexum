@@ -42,5 +42,7 @@ namespace Nexum.Server
 
         internal IPEndPoint EndPoint { get; set; }
         internal IPEndPoint LocalEndPoint { get; set; }
+
+        internal int LastSuccessfulLocalPort { get; set; }
     }
 }

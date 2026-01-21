@@ -60,7 +60,7 @@ namespace Nexum.Server
             bool allowDirectP2P = true)
         {
             ServerType = serverType;
-            Logger = Log.ForContext(Constants.SourceContextPropertyName, ServerType + "Server");
+            Logger = Log.ForContext(Constants.SourceContextPropertyName, $"{ServerType}Server");
             RSA = new RSACryptoServiceProvider(2048);
             NetSettings = CreateNetSettings(netSettings);
             AllowDirectP2P = allowDirectP2P;
@@ -217,7 +217,7 @@ namespace Nexum.Server
                 foreach (uint port in udpListenerPorts)
                 {
                     UdpSockets.TryAdd(port,
-                        new UdpSocket(this, ((IPEndPoint)Channel.LocalAddress).Address.MapToIPv4(), port));
+                        new UdpSocket(this, ((IPEndPoint)Channel.LocalAddress).Address.MapToIPv4(), (int)port));
                     Logger.Debug("UDP listener started on port {UdpPort}", port);
                 }
 

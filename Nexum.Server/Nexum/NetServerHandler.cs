@@ -762,13 +762,21 @@ namespace Nexum.Server
                         "NotifyP2PHolepunchSuccess => hostIdA = {HostIdA}, hostIdB = {HostIdB}, endpointA = {EndpointA}, endpointB = {EndpointB}, endpointC = {EndpointC}, endpointD = {EndpointD}",
                         hostIdA, hostIdB, endpointA, endpointB, endpointC, endpointD);
 
+                    session.LastP2PLocalPort = endpointD.Port;
+
                     bool shouldSendEstablish = HolepunchHelper.WithOrderedLocks(
                         hostIdA, hostIdB, stateA.StateLock, stateB.StateLock, () =>
                         {
                             if (session.HostId == peerA.Session.HostId)
+                            {
                                 stateA.HolepunchSuccess = true;
+                                stateA.LastSuccessfulLocalPort = endpointD.Port;
+                            }
                             else
+                            {
                                 stateB.HolepunchSuccess = true;
+                                stateB.LastSuccessfulLocalPort = endpointD.Port;
+                            }
 
                             bool canSend = (stateA.HolepunchSuccess || stateB.HolepunchSuccess) &&
                                            !stateA.EstablishSent;

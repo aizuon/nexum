@@ -8,14 +8,14 @@ namespace Nexum.Client
 {
     internal sealed class UdpHandler : ChannelHandlerAdapter
     {
-        private static readonly ILogger
-            Logger = Log.ForContext(Constants.SourceContextPropertyName, nameof(UdpHandler));
+        private readonly ILogger _logger;
 
         private readonly NetClient _owner;
 
-        public UdpHandler(NetClient owner)
+        public UdpHandler(NetClient owner, int port)
         {
             _owner = owner;
+            _logger = Log.ForContext(Constants.SourceContextPropertyName, $"{nameof(UdpHandler)}({port})");
         }
 
         public override void ChannelRead(IChannelHandlerContext context, object obj)
@@ -65,7 +65,7 @@ namespace Nexum.Client
 
             if (result == AssembledPacketError.Error)
             {
-                Logger.Warning("UDP defragmentation error: {Error}", error);
+                _logger.Warning("UDP defragmentation error: {Error}", error);
                 content.Release();
                 return;
             }

@@ -416,7 +416,6 @@ dotnet test Nexum.Tests/Nexum.Tests.csproj --collect:"XPlat Code Coverage"
 | DotNetty.Transport        | 0.7.6   | Async networking framework |
 | DotNetty.Codecs           | 0.7.6   | Frame encoding/decoding    |
 | BouncyCastle.Cryptography | 2.6.2   | AES/RC4 encryption         |
-| Ionic.Zlib                | 1.9.1.5 | Message compression        |
 | Serilog                   | 4.3.0   | Structured logging         |
 
 ## 📝 Server Types
@@ -437,12 +436,10 @@ public enum ServerType : byte
 
 The following features are planned or partially implemented:
 
-- [ ] **P2P Encrypted Messaging** - Keys are generated server-side but client-side encryption not yet applied to P2P messages
 - [ ] **Code Generation for RMI** - Source generator for type-safe RMI stubs instead of manual `rmiId` handling
-- [ ] **WiFi/Network Handover** - Seamless reconnection when the client's network changes (e.g., WiFi→mobile), preserving session state and recovering in-flight messages
 - [ ] **Advanced UDP Congestion Control** - Enhance `ReliableUdpHandler` with TCP-friendly rate control (TFRC) or BBR-style algorithms to prevent packet loss under load
 - [ ] **Super Peer / Host Selection** - Automatically elect the best peer (lowest latency, best connectivity) as host in P2P groups for authoritative state sync
-- [ ] **Port Mapping Reuse** - Optimize NAT traversal by reusing port mappings across multiple peers to reduce router NAT table pressure
+- [ ] **WiFi/Network Handover** - Seamless reconnection when the client's network changes (e.g., WiFi→mobile), preserving session state and recovering in-flight messages
 
 ## ⚙️ Configuration
 

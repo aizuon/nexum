@@ -46,6 +46,8 @@ namespace Nexum.Client
         internal static readonly ConcurrentDictionary<ServerType, NetClient> Clients =
             new ConcurrentDictionary<ServerType, NetClient>();
 
+        private readonly object _recycleLoopLock = new object();
+
         private readonly object _stateLock = new object();
 
         private readonly Stopwatch _stopwatch = Stopwatch.StartNew();
@@ -54,12 +56,19 @@ namespace Nexum.Client
             new ConcurrentDictionary<uint, byte>();
 
         internal readonly object RecvLock = new object();
+
+        internal readonly ConcurrentDictionary<ushort, RecycledUdpSocket> RecycledSockets =
+            new ConcurrentDictionary<ushort, RecycledUdpSocket>();
+
         internal readonly object SendLock = new object();
 
         internal readonly object UdpHolepunchLock = new object();
+
         private ConnectionState _connectionState = ConnectionState.Disconnected;
 
         private IEventLoopGroup _eventLoopGroup;
+
+        private ThreadLoop _recycleGarbageCollectLoop;
 
         internal ushort AimForPort = NetConfig.UdpAimForPort;
 
@@ -112,7 +121,7 @@ namespace Nexum.Client
         public NetClient(ServerType serverType)
         {
             ServerType = serverType;
-            Logger = Log.ForContext(Constants.SourceContextPropertyName, ServerType + "Client");
+            Logger = Log.ForContext(Constants.SourceContextPropertyName, $"{ServerType}Client");
 
             ServerMtuDiscovery = new MtuDiscovery();
             UdpFragBoard = new UdpPacketFragBoard { MtuDiscovery = ServerMtuDiscovery };
@@ -273,6 +282,8 @@ namespace Nexum.Client
             ReliablePingLoop = null;
             ReliableUdpLoop?.Stop();
             ReliableUdpLoop = null;
+            _recycleGarbageCollectLoop?.Stop();
+            _recycleGarbageCollectLoop = null;
 
             if (ToServerReliableUdp != null)
             {
@@ -284,6 +295,11 @@ namespace Nexum.Client
                 member.Close();
             P2PGroup?.P2PMembersInternal.Clear();
             P2PGroup = null;
+
+            // Clean up all recycled sockets
+            foreach (var recycled in RecycledSockets.Values)
+                GarbageSocket(recycled);
+            RecycledSockets.Clear();
 
             UdpChannel?.CloseAsync();
             UdpChannel = null;
@@ -344,6 +360,19 @@ namespace Nexum.Client
         internal (IChannel Channel, IEventLoopGroup WorkerGroup, int Port, bool PortReuseSuccess) ConnectUdp(
             int? targetPort = null)
         {
+            if (targetPort.HasValue && RecycledSockets.TryRemove((ushort)targetPort.Value, out var recycled))
+            {
+                if (recycled.Channel != null && recycled.Channel.Active && !recycled.Garbaged)
+                {
+                    recycled.RecycleTime = 0.0;
+                    recycled.Garbaged = false;
+                    Logger.Debug("Reusing recycled UDP socket on port {Port}", recycled.Port);
+                    return (recycled.Channel, recycled.EventLoopGroup, recycled.Port, true);
+                }
+
+                GarbageSocket(recycled);
+            }
+
             var workerGroup = new SingleThreadEventLoop();
             int aimPort = targetPort ?? AimForPort;
             int port = NetUtil.GetAvailablePort(aimPort);
@@ -367,7 +396,7 @@ namespace Nexum.Client
                     ch.Pipeline
                         .AddLast(new UdpFrameDecoder(NetConfig.MessageMaxLength))
                         .AddLast(new UdpFrameEncoder())
-                        .AddLast(new UdpHandler(this));
+                        .AddLast(new UdpHandler(this, port));
                 }))
                 .Option(ChannelOption.SoRcvbuf, NetConfig.UdpIssueRecvLength)
                 .Option(ChannelOption.SoSndbuf, NetConfig.UdpSendBufferLength)
@@ -385,6 +414,77 @@ namespace Nexum.Client
             });
 
             return (channel, workerGroup, port, portReuseSuccess);
+        }
+
+        internal void RecycleUdpSocket(IChannel channel, IEventLoopGroup eventLoopGroup, int port)
+        {
+            if (channel == null || !channel.Active)
+            {
+                Logger.Debug("Cannot recycle UDP socket on port {Port} - channel is null or inactive", port);
+                return;
+            }
+
+            var recycled = new RecycledUdpSocket(channel, eventLoopGroup, port, GetAbsoluteTime());
+            if (RecycledSockets.TryAdd((ushort)port, recycled))
+            {
+                Logger.Debug("Recycled UDP socket on port {Port}", port);
+                StartRecycleGarbageCollectLoopIfNeeded();
+            }
+            else
+            {
+                Logger.Debug("Port {Port} already has a recycled socket, disposing the new one", port);
+                GarbageSocket(recycled);
+            }
+        }
+
+        internal void GarbageSocket(RecycledUdpSocket recycled)
+        {
+            if (recycled == null || recycled.Garbaged)
+                return;
+
+            recycled.Garbaged = true;
+            Logger.Debug("Garbage collecting UDP socket on port {Port}", recycled.Port);
+
+            recycled.Channel?.CloseAsync();
+            recycled.EventLoopGroup?.ShutdownGracefullyAsync(TimeSpan.Zero, TimeSpan.Zero);
+        }
+
+        private void StartRecycleGarbageCollectLoopIfNeeded()
+        {
+            lock (_recycleLoopLock)
+            {
+                if (_recycleGarbageCollectLoop != null)
+                    return;
+
+                _recycleGarbageCollectLoop = new ThreadLoop(
+                    TimeSpan.FromSeconds(HolepunchConfig.NatPortRecycleReuseSeconds / 2),
+                    DoRecycleGarbageCollect);
+                _recycleGarbageCollectLoop.Start();
+            }
+        }
+
+        private void DoRecycleGarbageCollect(TimeSpan _)
+        {
+            double currentTime = GetAbsoluteTime();
+            double expirationTime = HolepunchConfig.NatPortRecycleReuseSeconds + 10.0;
+
+            foreach (var kvp in RecycledSockets)
+            {
+                var recycled = kvp.Value;
+                if (currentTime - recycled.RecycleTime > expirationTime)
+                    if (RecycledSockets.TryRemove(kvp.Key, out var removed))
+                    {
+                        Logger.Debug("Garbage collecting expired recycled socket on port {Port}", removed.Port);
+                        GarbageSocket(removed);
+                    }
+            }
+
+            if (RecycledSockets.IsEmpty)
+                lock (_recycleLoopLock)
+                {
+                    _recycleGarbageCollectLoop?.Stop();
+                    _recycleGarbageCollectLoop = null;
+                }
         }
 
         internal void CloseUdp()

@@ -73,7 +73,7 @@ namespace Nexum.Client
             GroupId = groupId;
             HostId = hostId;
             Logger = Log.ForContext("HostId", HostId).ForContext(Constants.SourceContextPropertyName,
-                $"{owner.ServerType}P2PMember({HostId})");
+                $"{owner.ServerType}{nameof(P2PMember)}({HostId})");
 
             UdpDefragBoard.LocalHostId = owner.HostId;
             UdpFragBoard.MtuDiscovery = MtuDiscovery;
@@ -278,7 +278,17 @@ namespace Nexum.Client
 
         internal void Close()
         {
-            Logger.Debug("Closing P2P connection to hostId = {HostId}", HostId);
+            Close(false);
+        }
+
+        internal void Close(bool shouldRecycleSocket)
+        {
+            Logger.Debug("Closing P2P connection to hostId = {HostId}, shouldRecycleSocket = {ShouldRecycle}",
+                HostId, shouldRecycleSocket);
+
+            bool wasDirectP2P = DirectP2P;
+            int localPort = SelfUdpLocalSocket?.Port ?? 0;
+
             IsClosed = true;
             DirectP2P = false;
             P2PHolepunchInitiated = false;
@@ -292,10 +302,23 @@ namespace Nexum.Client
                 ToPeerReliableUdp = null;
             }
 
-            PeerUdpChannel?.CloseAsync();
-            PeerUdpChannel = null;
-            PeerUdpEventLoopGroup?.ShutdownGracefullyAsync(TimeSpan.Zero, TimeSpan.Zero);
-            PeerUdpEventLoopGroup = null;
+            // Recycle the socket if this was a successful P2P connection (not relayed)
+            // This preserves NAT mappings for future connections
+            if (shouldRecycleSocket && wasDirectP2P && PeerUdpChannel != null && PeerUdpChannel.Active && localPort > 0)
+            {
+                Logger.Debug("Recycling P2P UDP socket on port {Port} for hostId = {HostId}", localPort, HostId);
+                Owner.RecycleUdpSocket(PeerUdpChannel, PeerUdpEventLoopGroup, localPort);
+                PeerUdpChannel = null;
+                PeerUdpEventLoopGroup = null;
+            }
+            else
+            {
+                // Socket was relayed or failed - garbage it
+                PeerUdpChannel?.CloseAsync();
+                PeerUdpChannel = null;
+                PeerUdpEventLoopGroup?.ShutdownGracefullyAsync(TimeSpan.Zero, TimeSpan.Zero);
+                PeerUdpEventLoopGroup = null;
+            }
 
             PeerLocalToRemoteSocket = null;
             PeerRemoteToLocalSocket = null;

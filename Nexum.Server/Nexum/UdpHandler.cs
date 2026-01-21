@@ -11,23 +11,24 @@ namespace Nexum.Server
 {
     internal sealed class UdpHandler : ChannelHandlerAdapter
     {
-        internal static readonly ILogger
-            Logger = Log.ForContext(Constants.SourceContextPropertyName, nameof(UdpHandler));
+        internal readonly ILogger
+            _logger;
 
         private readonly Stopwatch _stopwatch = Stopwatch.StartNew();
 
         internal readonly NetServer Owner;
 
-        internal UdpHandler(NetServer owner)
+        internal UdpHandler(NetServer owner, int port)
         {
             Owner = owner;
+            _logger = Log.ForContext(Constants.SourceContextPropertyName, $"{nameof(UdpHandler)}({port})");
         }
 
         public override void ChannelRead(IChannelHandlerContext context, object obj)
         {
             var message = obj as UdpMessage;
 
-            var log = Logger.ForContext("EndPoint",
+            var log = _logger.ForContext("EndPoint",
                 message.EndPoint.ToIPv4String());
 
             Owner.UdpSessions.TryGetValue(message.FilterTag, out var session);

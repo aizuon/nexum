@@ -265,5 +265,83 @@ namespace Nexum.Tests.Integration
             Assert.False(client1.P2PGroup.P2PMembers.ContainsKey(client2.HostId));
             Assert.Single(group.P2PMembers);
         }
+
+        [Fact(Timeout = 90000)]
+        public async Task P2PMessaging_EncryptedMessaging_MessagesDelivered()
+        {
+            var netSettings = new NetSettings
+            {
+                EnableP2PEncryptedMessaging = true,
+                EncryptedMessageKeyLength = 256,
+                FastEncryptedMessageKeyLength = 512
+            };
+
+            Server = await CreateServerAsync(netSettings: netSettings);
+
+            var client1 = await CreateClientAsync();
+            await WaitForClientConnectionAsync(client1);
+
+            var client2 = await CreateClientAsync();
+            await WaitForClientConnectionAsync(client2);
+
+            var session1 = Server.Sessions[client1.HostId];
+            var session2 = Server.Sessions[client2.HostId];
+            var group = Server.CreateP2PGroup();
+
+            group.Join(session1);
+            group.Join(session2);
+
+            await WaitForClientUdpEnabledAsync(client1, GetAdjustedTimeout(UdpSetupTimeout));
+            await WaitForClientUdpEnabledAsync(client2, GetAdjustedTimeout(UdpSetupTimeout));
+
+            await WaitForConditionAsync(
+                () => client1.P2PGroup?.P2PMembers.ContainsKey(client2.HostId) == true &&
+                      client2.P2PGroup?.P2PMembers.ContainsKey(client1.HostId) == true,
+                GetAdjustedTimeout(MessageTimeout));
+
+            var peer1 = client1.P2PGroup.P2PMembers[client2.HostId];
+            var peer2 = client2.P2PGroup.P2PMembers[client1.HostId];
+
+            await WaitForP2PDirectConnectionAsync(peer1, GetAdjustedTimeout(UdpSetupTimeout));
+            await WaitForP2PDirectConnectionAsync(peer2, GetAdjustedTimeout(UdpSetupTimeout));
+
+            Assert.True(peer1.DirectP2P, "Peer1 should have direct P2P connection");
+            Assert.True(peer2.DirectP2P, "Peer2 should have direct P2P connection");
+
+            int client1Received = 0;
+            int client2Received = 0;
+            var client1Done = new ManualResetEventSlim(false);
+            var client2Done = new ManualResetEventSlim(false);
+
+            client1.OnRMIReceive += (msg, _) =>
+            {
+                msg.Read(out client1Received);
+                client1Done.Set();
+            };
+
+            client2.OnRMIReceive += (msg, _) =>
+            {
+                msg.Read(out client2Received);
+                client2Done.Set();
+            };
+
+            var peerMessage1 = new NetMessage();
+            peerMessage1.Write(555);
+            peer1.RmiToPeer(7005, peerMessage1, EncryptMode.Secure, reliable: true);
+
+            var peerMessage2 = new NetMessage();
+            peerMessage2.Write(666);
+            peer2.RmiToPeer(7006, peerMessage2, EncryptMode.Fast, reliable: true);
+
+            Assert.True(client2Done.Wait(GetAdjustedTimeout(ConnectionTimeout)),
+                "Client2 should receive encrypted P2P message");
+            Assert.True(client1Done.Wait(GetAdjustedTimeout(ConnectionTimeout)),
+                "Client1 should receive encrypted P2P message");
+            Assert.Equal(555, client2Received);
+            Assert.Equal(666, client1Received);
+
+            Output.WriteLine($"P2P encrypted communication successful. " +
+                             $"Peer1 DirectP2P: {peer1.DirectP2P}, Peer2 DirectP2P: {peer2.DirectP2P}");
+        }
     }
 }

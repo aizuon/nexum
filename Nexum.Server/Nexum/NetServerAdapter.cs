@@ -15,7 +15,8 @@ namespace Nexum.Server
         internal NetServerAdapter(NetServer owner)
         {
             Owner = owner;
-            Logger = Log.ForContext(Constants.SourceContextPropertyName, owner.ServerType + "ServerAdapter");
+            Logger = Log.ForContext(Constants.SourceContextPropertyName,
+                $"{owner.ServerType}ServerAdapter");
         }
 
         public override void ChannelRead(IChannelHandlerContext context, object message)
