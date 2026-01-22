@@ -39,6 +39,9 @@ namespace Nexum.Client
         public override void ChannelActive(IChannelHandlerContext context)
         {
             base.ChannelActive(context);
+
+            _owner.Channel = context.Channel;
+
             var remoteAddress = context.Channel.RemoteAddress;
             _logger.Debug("Client connected to {ServerType} at {RemoteAddress}",
                 _owner.ServerType, ((IPEndPoint)remoteAddress).ToIPv4String());
