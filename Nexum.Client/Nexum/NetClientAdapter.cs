@@ -11,14 +11,19 @@ namespace Nexum.Client
 {
     internal sealed class NetClientAdapter : ChannelHandlerAdapter
     {
-        private readonly ILogger _logger;
         private readonly NetClient _owner;
+        private ILogger _logger;
 
         internal NetClientAdapter(NetClient owner)
         {
             _owner = owner;
             _logger = Log.ForContext(Constants.SourceContextPropertyName,
                 $"{owner.ServerType}ClientAdapter");
+        }
+
+        internal void UpdateLoggerContext(string context)
+        {
+            _logger = Log.ForContext(Constants.SourceContextPropertyName, context);
         }
 
         public override void ChannelInactive(IChannelHandlerContext context)

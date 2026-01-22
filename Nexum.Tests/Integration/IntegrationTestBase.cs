@@ -159,8 +159,8 @@ namespace Nexum.Tests.Integration
             {
                 if (client.HostId != 0)
                 {
-                    client.Close();
-                    await Task.Delay(50);
+                    await client.CloseAsync();
+                    await Task.Delay(300);
                 }
             }
             catch
@@ -194,7 +194,7 @@ namespace Nexum.Tests.Integration
 
                 server.SessionsInternal.Clear();
 
-                await Task.Delay(50);
+                await Task.Delay(300);
 
                 server.Dispose();
             }

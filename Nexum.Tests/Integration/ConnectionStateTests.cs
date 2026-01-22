@@ -63,7 +63,7 @@ namespace Nexum.Tests.Integration
             Assert.True(handshakingCalled.IsSet, "OnSessionHandshaking should be called");
             Assert.True(connectedCalled.IsSet, "OnSessionConnected should be called");
 
-            client.Close();
+            await client.CloseAsync();
             await Task.Delay(300);
             client.Dispose();
 

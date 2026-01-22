@@ -111,7 +111,8 @@ namespace Nexum.E2E.Client
             Log.Information("Direct P2P scenario PASSED");
 
             Log.Information("=== ALL SCENARIOS PASSED ===");
-            _client.Close();
+            await _client.CloseAsync();
+            await Task.Delay(300);
             _client.Dispose();
             return 0;
         }

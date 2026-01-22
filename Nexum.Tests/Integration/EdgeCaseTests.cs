@@ -117,8 +117,8 @@ namespace Nexum.Tests.Integration
 
                 Assert.NotEqual(0u, client.HostId);
 
-                client.Close();
-                await Task.Delay(100);
+                await client.CloseAsync();
+                await Task.Delay(300);
                 client.Dispose();
                 CreatedClients.Remove(client);
 

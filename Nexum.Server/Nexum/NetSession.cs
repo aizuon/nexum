@@ -45,6 +45,8 @@ namespace Nexum.Server
 
             Logger = Log.ForContext("HostId", HostId).ForContext("EndPoint", RemoteEndPoint.Address.ToString())
                 .ForContext(Constants.SourceContextPropertyName, $"{server.ServerType}Session({HostId})");
+
+            CreatedTime = GetAbsoluteTime();
         }
 
         public uint HostId { get; }
@@ -104,6 +106,10 @@ namespace Nexum.Server
         internal bool UdpSessionInitialized { get; set; }
 
         internal UdpSocket UdpSocket { get; set; }
+
+        internal double CreatedTime { get; }
+
+        internal bool ConnectTimeoutSent { get; set; }
 
         internal IPEndPoint UdpEndPointInternal
         {

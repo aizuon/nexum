@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using Serilog.Core;
 using Serilog.Events;
 
@@ -6,8 +7,12 @@ namespace BaseLib
 {
     public sealed class ContextEnricher : ILogEventEnricher
     {
-        private const int MaxLength = 24;
+        private const int MinLength = 24;
+        private const int WindowSize = 100;
         private const string EmptyContext = "NULL";
+
+        private readonly ConcurrentQueue<int> _recentLengths = new ConcurrentQueue<int>();
+        private volatile int _currentMaxLength = MinLength;
 
         public void Enrich(LogEvent logEvent, ILogEventPropertyFactory propertyFactory)
         {
@@ -31,18 +36,23 @@ namespace BaseLib
                 ctx = EmptyContext.AsSpan();
             }
 
-            if (ctx.Length > MaxLength)
-                ctx = ctx[..MaxLength];
+            int originalCtxLen = ctx.Length;
+
+            TrackLength(originalCtxLen);
+            int maxLength = _currentMaxLength;
+
+            if (ctx.Length > maxLength)
+                ctx = ctx[..maxLength];
 
             string newCtx;
             int ctxLen = ctx.Length;
 
-            if (ctxLen < MaxLength)
+            if (ctxLen < maxLength)
             {
-                int paddingTotal = MaxLength - ctxLen;
+                int paddingTotal = maxLength - ctxLen;
                 int leftPadding = (paddingTotal + 1) / 2;
 
-                newCtx = string.Create(MaxLength, (ctxString, ctxLen, leftPadding), static (span, state) =>
+                newCtx = string.Create(maxLength, (ctxString, ctxLen, leftPadding), static (span, state) =>
                 {
                     span.Fill(' ');
                     var source = state.ctxString != null
@@ -53,11 +63,29 @@ namespace BaseLib
             }
             else
             {
-                newCtx = ctxString != null ? ctxString[..MaxLength] : EmptyContext;
+                newCtx = ctxString != null ? ctxString[..maxLength] : EmptyContext;
             }
 
             var eventType = propertyFactory.CreateProperty("SrcContext", newCtx);
             logEvent.AddPropertyIfAbsent(eventType);
+        }
+
+        private void TrackLength(int length)
+        {
+            _recentLengths.Enqueue(length);
+
+            while (_recentLengths.Count > WindowSize)
+                _recentLengths.TryDequeue(out _);
+
+            if (_recentLengths.Count > 0)
+            {
+                int maxSeen = MinLength;
+                foreach (int len in _recentLengths)
+                    if (len > maxSeen)
+                        maxSeen = len;
+
+                _currentMaxLength = maxSeen;
+            }
         }
     }
 }

@@ -448,6 +448,7 @@ The following features are planned or partially implemented:
 | Setting                                     | Type     | Default | Description                     |
 | ------------------------------------------- | -------- | ------- | ------------------------------- |
 | `NetSettings.EnableNagleAlgorithm`          | `bool`   | `true`  | TCP Nagle algorithm             |
+| `NetSettings.EnableP2PEncryptedMessaging`   | `bool`   | `false` | Encryption for P2P messages     |
 | `NetSettings.IdleTimeout`                   | `double` | 900     | Session idle timeout in seconds |
 | `NetSettings.MessageMaxLength`              | `uint`   | 1048576 | Maximum message size            |
 | `NetSettings.EncryptedMessageKeyLength`     | `uint`   | 256     | AES key length in bits          |

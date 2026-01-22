@@ -50,7 +50,7 @@ namespace Nexum.Tests.Integration
 
             Assert.Single(Server.Sessions);
 
-            client.Close();
+            await client.CloseAsync();
             await Task.Delay(300);
             client.Dispose();
 

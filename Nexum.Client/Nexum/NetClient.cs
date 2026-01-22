@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Linq;
 using System.Net;
 using System.Runtime.CompilerServices;
+using System.Threading;
 using System.Threading.Tasks;
 using BaseLib;
 using BaseLib.Extensions;
@@ -46,6 +47,8 @@ namespace Nexum.Client
         internal static readonly ConcurrentDictionary<ServerType, NetClient> Clients =
             new ConcurrentDictionary<ServerType, NetClient>();
 
+        private static readonly Mutex _udpConnectMutex = new Mutex(false, "NexumUdpConnectMutex");
+
         private readonly object _recycleLoopLock = new object();
 
         private readonly object _stateLock = new object();
@@ -68,7 +71,9 @@ namespace Nexum.Client
 
         private IEventLoopGroup _eventLoopGroup;
 
-        private ThreadLoop _recycleGarbageCollectLoop;
+        private volatile bool _isDisposed;
+
+        private bool _recycleGarbageCollectLoopRunning;
 
         internal ushort AimForPort = NetConfig.UdpAimForPort;
 
@@ -92,7 +97,8 @@ namespace Nexum.Client
         internal Guid PeerUdpMagicNumber;
 
         internal double RecentFrameRate;
-        internal ThreadLoop ReliablePingLoop;
+        internal double ReliablePingInterval;
+        internal bool ReliablePingLoopRunning;
         internal ThreadLoop ReliableUdpLoop;
         internal IPEndPoint SelfUdpSocket;
 
@@ -165,6 +171,11 @@ namespace Nexum.Client
             }
         }
 
+        internal void UpdateLoggerContext(string context)
+        {
+            Logger = Log.ForContext(Constants.SourceContextPropertyName, context);
+        }
+
         public event EventHandler<ConnectionStateChangedEventArgs> ConnectionStateChanged;
 
         public void SetPinnedServerPublicKey(byte[] derEncodedKey)
@@ -206,9 +217,11 @@ namespace Nexum.Client
         public async Task ConnectAsync(IPEndPoint ipEndPoint)
         {
             SetConnectionState(ConnectionState.Connecting);
-            Logger.Debug("Connecting to {Endpoint}", ipEndPoint.ToIPv4String());
+            Logger.Debug("Connecting to {Endpoint} with timeout {Timeout}s", ipEndPoint.ToIPv4String(),
+                NetConfig.TcpSocketConnectTimeout);
             _eventLoopGroup = new MultithreadEventLoopGroup();
-            Channel = await new Bootstrap()
+
+            var connectTask = new Bootstrap()
                 .Group(_eventLoopGroup)
                 .Channel<TcpSocketChannel>()
                 .Handler(new ActionChannelInitializer<ISocketChannel>(channel =>
@@ -222,19 +235,73 @@ namespace Nexum.Client
                 .Option(ChannelOption.SoSndbuf, NetConfig.TcpSendBufferLength)
                 .Option(ChannelOption.AllowHalfClosure, false)
                 .Option(ChannelOption.Allocator, UnpooledByteBufferAllocator.Default)
+                .Option(ChannelOption.ConnectTimeout, TimeSpan.FromSeconds(NetConfig.TcpSocketConnectTimeout))
                 .ConnectAsync(ipEndPoint);
 
+            var timeoutTask = Task.Delay(TimeSpan.FromSeconds(NetConfig.TcpSocketConnectTimeout));
+            var completedTask = await Task.WhenAny(connectTask, timeoutTask);
+
+            if (completedTask == timeoutTask)
+            {
+                Logger.Warning("TCP connection to {Endpoint} timed out after {Timeout}s", ipEndPoint.ToIPv4String(),
+                    NetConfig.TcpSocketConnectTimeout);
+                SetConnectionState(ConnectionState.Disconnected);
+                _eventLoopGroup?.ShutdownGracefullyAsync(TimeSpan.Zero, TimeSpan.Zero);
+                _eventLoopGroup = null;
+                throw new TimeoutException(
+                    $"TCP connection to {ipEndPoint.ToIPv4String()} timed out after {NetConfig.TcpSocketConnectTimeout}s");
+            }
+
+            Channel = await connectTask;
             Logger.Debug("TCP connection established to {Endpoint}", ipEndPoint.ToIPv4String());
         }
 
-        public void Close()
+        public async Task<bool> CloseAsync(bool graceful = true)
         {
-            Logger.Debug("Initiating graceful TCP shutdown to {ServerType}", ServerType);
-            var shutdownTcp = new NetMessage();
+            if (!graceful)
+            {
+                Logger.Debug("Forcing immediate disconnect from {ServerType}", ServerType);
+                Dispose();
+                return false;
+            }
 
-            shutdownTcp.Write(new ByteArray());
+            Logger.Debug("Initiating graceful TCP shutdown to {ServerType} with timeout {Timeout}s", ServerType,
+                NetConfig.GracefulDisconnectTimeout);
 
-            RmiToServer((ushort)NexumOpCode.ShutdownTcp, shutdownTcp);
+            var tcs = new TaskCompletionSource<bool>();
+
+            void OnDisconnectedHandler()
+            {
+                tcs.TrySetResult(true);
+            }
+
+            OnDisconnected += OnDisconnectedHandler;
+
+            try
+            {
+                var shutdownTcp = new NetMessage();
+                shutdownTcp.Write(new ByteArray());
+                RmiToServer((ushort)NexumOpCode.ShutdownTcp, shutdownTcp);
+
+                var timeoutTask = Task.Delay(TimeSpan.FromSeconds(NetConfig.GracefulDisconnectTimeout));
+                var completedTask = await Task.WhenAny(tcs.Task, timeoutTask);
+
+                if (completedTask == timeoutTask)
+                {
+                    Logger.Warning("Graceful disconnect timed out after {Timeout}s, forcing disconnect",
+                        NetConfig.GracefulDisconnectTimeout);
+                    Dispose();
+                    return false;
+                }
+
+                Logger.Debug("Graceful disconnect completed successfully");
+                Dispose();
+                return true;
+            }
+            finally
+            {
+                OnDisconnected -= OnDisconnectedHandler;
+            }
         }
 
         public void RmiToServer(ushort rmiId, NetMessage message, EncryptMode ecMode = EncryptMode.Secure)
@@ -272,18 +339,21 @@ namespace Nexum.Client
 
         public override void Dispose()
         {
+            if (_isDisposed)
+                return;
+
+            _isDisposed = true;
+
             Logger.Debug("Disposing NetClient for {ServerType}", ServerType);
 
             SetConnectionState(ConnectionState.Disconnected);
 
             UnreliablePingLoop?.Stop();
             UnreliablePingLoop = null;
-            ReliablePingLoop?.Stop();
-            ReliablePingLoop = null;
+            ReliablePingLoopRunning = false;
             ReliableUdpLoop?.Stop();
             ReliableUdpLoop = null;
-            _recycleGarbageCollectLoop?.Stop();
-            _recycleGarbageCollectLoop = null;
+            _recycleGarbageCollectLoopRunning = false;
 
             if (ToServerReliableUdp != null)
             {
@@ -356,8 +426,9 @@ namespace Nexum.Client
                 OnDisconnected();
         }
 
-        internal (IChannel Channel, IEventLoopGroup WorkerGroup, int Port, bool PortReuseSuccess) ConnectUdp(
-            int? targetPort = null)
+        internal (IChannel Channel, IEventLoopGroup WorkerGroup, int Port, bool PortReuseSuccess)
+            ConnectUdp(
+                int? targetPort = null)
         {
             if (targetPort.HasValue && RecycledSockets.TryRemove((ushort)targetPort.Value, out var recycled))
             {
@@ -372,47 +443,55 @@ namespace Nexum.Client
                 GarbageSocket(recycled);
             }
 
-            var workerGroup = new SingleThreadEventLoop();
-            int aimPort = targetPort ?? AimForPort;
-            int port = NetUtil.GetAvailablePort(aimPort);
-            bool portReuseSuccess = targetPort.HasValue && port == targetPort.Value;
-            Logger.Debug("Allocating UDP port {Port}", port);
-            AimForPort = (ushort)(port + 1);
-            var channel = new Bootstrap()
-                .Group(workerGroup)
-                .Channel<SocketDatagramChannel>()
-                .Handler(new ActionChannelInitializer<IChannel>(ch =>
-                {
-                    if (NetworkSimulationProfile != null && !NetworkSimulationProfile.IsIdeal)
-                    {
-                        var handler = new SimulatedUdpChannelHandler(NetworkSimulationProfile);
-                        ch.Pipeline.AddFirst("network-simulation", handler);
-                        NetworkSimulationStats.RegisterHandler(ch, handler);
-                    }
-
-                    UdpPipelineConfigurator?.Invoke(ch.Pipeline);
-
-                    ch.Pipeline
-                        .AddLast(new UdpFrameDecoder(NetConfig.MessageMaxLength))
-                        .AddLast(new UdpFrameEncoder())
-                        .AddLast(new UdpHandler(this, port));
-                }))
-                .Option(ChannelOption.SoRcvbuf, NetConfig.UdpIssueRecvLength)
-                .Option(ChannelOption.SoSndbuf, NetConfig.UdpSendBufferLength)
-                .Option(ChannelOption.Allocator, UnpooledByteBufferAllocator.Default)
-                .BindAsync(new IPEndPoint(LocalIP, port))
-                .GetAwaiter()
-                .GetResult();
-
-            Logger.Debug("UDP socket bound on port {Port}", port);
-
-            channel.CloseCompletion.ContinueWith(_ =>
+            _udpConnectMutex.WaitOne();
+            try
             {
-                Logger.Debug("UDP socket on port {Port} closed", port);
-                NetUtil.ReleasePort(port);
-            });
+                var workerGroup = new SingleThreadEventLoop();
+                int aimPort = targetPort ?? AimForPort;
+                int port = NetUtil.GetAvailablePort(aimPort);
+                bool portReuseSuccess = targetPort.HasValue && port == targetPort.Value;
+                Logger.Debug("Allocating UDP port {Port}", port);
+                AimForPort = (ushort)(port + 1);
 
-            return (channel, workerGroup, port, portReuseSuccess);
+                var channel = new Bootstrap()
+                    .Group(workerGroup)
+                    .Channel<SocketDatagramChannel>()
+                    .Handler(new ActionChannelInitializer<IChannel>(ch =>
+                    {
+                        if (NetworkSimulationProfile != null && !NetworkSimulationProfile.IsIdeal)
+                        {
+                            var handler = new SimulatedUdpChannelHandler(NetworkSimulationProfile);
+                            ch.Pipeline.AddFirst("network-simulation", handler);
+                            NetworkSimulationStats.RegisterHandler(ch, handler);
+                        }
+
+                        UdpPipelineConfigurator?.Invoke(ch.Pipeline);
+
+                        ch.Pipeline
+                            .AddLast(new UdpFrameDecoder(NetConfig.MessageMaxLength))
+                            .AddLast(new UdpFrameEncoder())
+                            .AddLast(new UdpHandler(this, port));
+                    }))
+                    .Option(ChannelOption.SoRcvbuf, NetConfig.UdpIssueRecvLength)
+                    .Option(ChannelOption.SoSndbuf, NetConfig.UdpSendBufferLength)
+                    .Option(ChannelOption.Allocator, UnpooledByteBufferAllocator.Default)
+                    .BindAsync(new IPEndPoint(LocalIP, port))
+                    .GetAwaiter().GetResult();
+
+                Logger.Debug("UDP socket bound on port {Port}", port);
+
+                _ = channel.CloseCompletion.ContinueWith(_ =>
+                {
+                    Logger.Debug("UDP socket on port {Port} closed", port);
+                    NetUtil.ReleasePort(port);
+                });
+
+                return (channel, workerGroup, port, portReuseSuccess);
+            }
+            finally
+            {
+                _udpConnectMutex.ReleaseMutex();
+            }
         }
 
         internal void RecycleUdpSocket(IChannel channel, IEventLoopGroup eventLoopGroup, int port)
@@ -452,38 +531,48 @@ namespace Nexum.Client
         {
             lock (_recycleLoopLock)
             {
-                if (_recycleGarbageCollectLoop != null)
+                if (_recycleGarbageCollectLoopRunning)
                     return;
 
-                _recycleGarbageCollectLoop = new ThreadLoop(
-                    TimeSpan.FromSeconds(HolepunchConfig.NatPortRecycleReuseSeconds / 2),
-                    DoRecycleGarbageCollect);
-                _recycleGarbageCollectLoop.Start();
+                _recycleGarbageCollectLoopRunning = true;
+                ScheduleAsync(DoRecycleGarbageCollect, this, null,
+                    TimeSpan.FromSeconds(HolepunchConfig.NatPortRecycleReuseSeconds / 2));
             }
         }
 
-        private void DoRecycleGarbageCollect(TimeSpan _)
+        private static void DoRecycleGarbageCollect(object context, object _)
         {
-            double currentTime = GetAbsoluteTime();
+            if (context == null)
+                return;
+
+            var client = (NetClient)context;
+
+            if (!client._recycleGarbageCollectLoopRunning)
+                return;
+
+            double currentTime = client.GetAbsoluteTime();
             double expirationTime = HolepunchConfig.NatPortRecycleReuseSeconds + 10.0;
 
-            foreach (var kvp in RecycledSockets)
+            foreach (var kvp in client.RecycledSockets)
             {
                 var recycled = kvp.Value;
                 if (currentTime - recycled.RecycleTime > expirationTime)
-                    if (RecycledSockets.TryRemove(kvp.Key, out var removed))
+                    if (client.RecycledSockets.TryRemove(kvp.Key, out var removed))
                     {
-                        Logger.Debug("Garbage collecting expired recycled socket on port {Port}", removed.Port);
-                        GarbageSocket(removed);
+                        client.Logger.Debug("Garbage collecting expired recycled socket on port {Port}", removed.Port);
+                        client.GarbageSocket(removed);
                     }
             }
 
-            if (RecycledSockets.IsEmpty)
-                lock (_recycleLoopLock)
+            if (client.RecycledSockets.IsEmpty)
+                lock (client._recycleLoopLock)
                 {
-                    _recycleGarbageCollectLoop?.Stop();
-                    _recycleGarbageCollectLoop = null;
+                    client._recycleGarbageCollectLoopRunning = false;
+                    return;
                 }
+
+            client.ScheduleAsync(DoRecycleGarbageCollect, client, null,
+                TimeSpan.FromSeconds(HolepunchConfig.NatPortRecycleReuseSeconds / 2));
         }
 
         internal void CloseUdp()
@@ -543,21 +632,59 @@ namespace Nexum.Client
                 firstFrameNumber);
         }
 
-        internal void SendReliablePing()
+
+        internal void StartReliablePingLoop(double interval)
         {
-            if (ConnectionState != ConnectionState.Connected)
+            if (ReliablePingLoopRunning)
                 return;
 
-            var reliablePingMsg = new NetMessage();
-            reliablePingMsg.Write(RecentFrameRate);
-            RmiToServer((ushort)NexumOpCode.ReliablePing, reliablePingMsg);
+            ReliablePingLoopRunning = true;
+            ReliablePingInterval = interval;
+            ScheduleAsync(SendReliablePingScheduled, this, null, TimeSpan.FromSeconds(interval));
+        }
+
+        internal Task ScheduleAsync(Action<object, object> action, object context, object state, TimeSpan delay)
+        {
+            return _eventLoopGroup?.ScheduleAsync(action, context, state, delay);
+        }
+
+        private static void SendReliablePingScheduled(object context, object _)
+        {
+            if (context == null)
+                return;
+
+            var client = (NetClient)context;
+
+            if (!client.ReliablePingLoopRunning)
+                return;
+
+            if (client.ConnectionState == ConnectionState.Connected)
+            {
+                var reliablePingMsg = new NetMessage();
+                reliablePingMsg.Write(client.RecentFrameRate);
+                client.RmiToServer((ushort)NexumOpCode.ReliablePing, reliablePingMsg);
+            }
+
+            client.ScheduleAsync(SendReliablePingScheduled, client, null,
+                TimeSpan.FromSeconds(client.ReliablePingInterval));
+        }
+
+        internal void StartUnreliablePingLoop()
+        {
+            if (UnreliablePingLoop != null)
+                return;
+
+            UnreliablePingLoop = new ThreadLoop(
+                TimeSpan.FromSeconds(ReliableUdpConfig.CsPingInterval),
+                SendUdpPing);
+            UnreliablePingLoop.Start();
         }
 
         internal void SendUdpPing(TimeSpan delta)
         {
             double currentTime = GetAbsoluteTime();
 
-            UpdateFrameRate(delta);
+            UpdateFrameRate(delta.TotalSeconds);
             CheckServerUdpTimeout(currentTime);
 
             int paddingSize = ServerMtuDiscovery.GetProbePaddingSize(currentTime);
@@ -578,6 +705,24 @@ namespace Nexum.Client
             }
 
             NexumToServerUdpIfAvailable(unreliablePing, true);
+        }
+
+        internal bool IsFromRemoteClientPeer(IPEndPoint udpEndPoint = null, ushort filterTag = 0,
+            uint relayFrom = 0)
+        {
+            if (udpEndPoint != null && ServerUdpSocket != null &&
+                udpEndPoint.Equals(ServerUdpSocket))
+                return false;
+            if (FilterTag.Create((uint)Core.HostId.Server, HostId) == filterTag)
+                return false;
+            if (relayFrom == 0)
+                return false;
+
+            if (P2PGroup == null)
+                return false;
+
+            var member = P2PGroup.FindMember(HostId, udpEndPoint, filterTag, relayFrom);
+            return member != null;
         }
 
         internal void NexumToServer(NetMessage data)
@@ -687,12 +832,9 @@ namespace Nexum.Client
 
             UdpEnabled = false;
 
-            Task.Run(() =>
-            {
-                CloseUdp();
+            CloseUdp();
 
-                RmiToServer((ushort)NexumOpCode.C2S_RequestCreateUdpSocket, new NetMessage());
-            });
+            RmiToServer((ushort)NexumOpCode.C2S_RequestCreateUdpSocket, new NetMessage());
         }
 
         private void ReliableUdpFrameMove(TimeSpan delta)
@@ -709,9 +851,8 @@ namespace Nexum.Client
                         member.FrameMove(elapsedTime);
         }
 
-        private void UpdateFrameRate(TimeSpan delta)
+        private void UpdateFrameRate(double deltaSeconds)
         {
-            double deltaSeconds = delta.TotalSeconds;
             if (deltaSeconds > 0)
             {
                 double instantFrameRate = 1.0 / deltaSeconds;
@@ -745,27 +886,24 @@ namespace Nexum.Client
             bool wasEnabled = UdpEnabled;
             UdpEnabled = false;
 
-            Task.Run(() =>
+            CloseUdp();
+
+            if (wasEnabled)
+                OnUdpDisconnected();
+
+            RmiToServer((ushort)NexumOpCode.NotifyUdpToTcpFallbackByClient, new NetMessage());
+
+            if (ServerUdpFallbackCount < ReliableUdpConfig.ServerUdpRepunchMaxTrialCount)
             {
-                CloseUdp();
+                ServerUdpFallbackCount++;
 
-                if (wasEnabled)
-                    OnUdpDisconnected();
-
-                RmiToServer((ushort)NexumOpCode.NotifyUdpToTcpFallbackByClient, new NetMessage());
-
-                if (ServerUdpFallbackCount < ReliableUdpConfig.ServerUdpRepunchMaxTrialCount)
-                {
-                    ServerUdpFallbackCount++;
-
-                    RmiToServer((ushort)NexumOpCode.C2S_RequestCreateUdpSocket, new NetMessage());
-                }
-                else
-                {
-                    Logger.Warning("Server UDP max repunch attempts ({MaxAttempts}) reached, staying on TCP",
-                        ReliableUdpConfig.ServerUdpRepunchMaxTrialCount);
-                }
-            });
+                RmiToServer((ushort)NexumOpCode.C2S_RequestCreateUdpSocket, new NetMessage());
+            }
+            else
+            {
+                Logger.Warning("Server UDP max repunch attempts ({MaxAttempts}) reached, staying on TCP",
+                    ReliableUdpConfig.ServerUdpRepunchMaxTrialCount);
+            }
         }
     }
 }

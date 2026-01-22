@@ -6,12 +6,13 @@ using System.Net.NetworkInformation;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
+using System.Threading;
 
 namespace Nexum.Client
 {
     internal static class NetUtil
     {
-        private static readonly object PortLock = new object();
+        private static readonly Mutex PortMutex = new Mutex(false, "NexumAvailablePortMutex");
         private static readonly HashSet<int> _reservedPorts = new HashSet<int>();
         private static readonly List<(int Start, int End)> _windowsExcludedRanges = new List<(int, int)>();
         private static bool _excludedRangesInitialized;
@@ -82,7 +83,8 @@ namespace Nexum.Client
 
         internal static int GetAvailablePort(int startingPort)
         {
-            lock (PortLock)
+            PortMutex.WaitOne();
+            try
             {
                 if (startingPort < IPEndPoint.MinPort)
                     startingPort = IPEndPoint.MinPort;
@@ -119,6 +121,10 @@ namespace Nexum.Client
                 }
 
                 throw new InvalidOperationException("No available ports.");
+            }
+            finally
+            {
+                PortMutex.ReleaseMutex();
             }
         }
 
@@ -173,9 +179,14 @@ namespace Nexum.Client
 
         internal static void ReleasePort(int port)
         {
-            lock (PortLock)
+            PortMutex.WaitOne();
+            try
             {
                 _reservedPorts.Remove(port);
+            }
+            finally
+            {
+                PortMutex.ReleaseMutex();
             }
         }
     }

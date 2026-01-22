@@ -13,5 +13,8 @@ namespace Nexum.Core
         internal const int UdpSendBufferLength = 8192;
         internal const ushort UdpAimForPort = 58800;
         internal const double NoPingTimeoutTime = 900.0;
+        internal const double ConnectTimeout = 10.0;
+        internal const double GracefulDisconnectTimeout = 2.0;
+        internal const double TcpSocketConnectTimeout = 10.0;
     }
 }

@@ -35,11 +35,12 @@ namespace Nexum.Server
         private static readonly TimeSpan UdpSetupRetryInterval =
             TimeSpan.FromSeconds(HolepunchConfig.UdpSetupRetrySeconds);
 
-        private static readonly TimeSpan
-            UdpPingTimeout = TimeSpan.FromSeconds(HolepunchConfig.UdpPingTimeoutSeconds);
+        private static readonly TimeSpan ConnectTimeoutCheckInterval = TimeSpan.FromSeconds(2);
 
         private static readonly IPEndPoint DummyEndPoint = new IPEndPoint(IPAddress.Parse("255.255.255.255"), 65535);
         private readonly object _udpSocketsCacheLock = new object();
+
+        private IEventLoopGroup _eventLoopGroup;
 
         private ThreadLoop _reliableUdpLoop;
         private UdpSocket[] _udpSocketsCache;
@@ -100,9 +101,7 @@ namespace Nexum.Server
             LocalHostId = (uint)HostId.Server
         };
 
-        internal IPAddress IPAddress { get; set; }
-
-        internal IEventLoopGroup EventLoopGroup { get; set; }
+        internal IPAddress IPAddress { get; private set; }
 
         public event EventHandler<SessionConnectionStateChangedEventArgs> SessionConnectionStateChanged;
 
@@ -188,12 +187,12 @@ namespace Nexum.Server
 
         public async Task ListenAsync(IPEndPoint endPoint, uint[] udpListenerPorts = null)
         {
-            EventLoopGroup = new MultithreadEventLoopGroup();
+            _eventLoopGroup = new MultithreadEventLoopGroup();
 
             IPAddress = endPoint.Address;
 
             Channel = await new ServerBootstrap()
-                .Group(EventLoopGroup)
+                .Group(_eventLoopGroup)
                 .Channel<TcpServerSocketChannel>()
                 .Handler(new ActionChannelInitializer<IServerSocketChannel>(_ => { }))
                 .ChildHandler(new ActionChannelInitializer<ISocketChannel>(ch =>
@@ -228,6 +227,7 @@ namespace Nexum.Server
             }
 
             RetryUdpOrHolepunchIfRequired(this, null);
+            CheckConnectTimeouts(this, null);
 
             Logger.Debug("Listening on {Endpoint}", endPoint.ToIPv4String());
 
@@ -258,8 +258,8 @@ namespace Nexum.Server
 
             Channel?.CloseAsync();
             Channel = null;
-            EventLoopGroup?.ShutdownGracefullyAsync(TimeSpan.Zero, TimeSpan.Zero);
-            EventLoopGroup = null;
+            _eventLoopGroup?.ShutdownGracefullyAsync(TimeSpan.Zero, TimeSpan.Zero);
+            _eventLoopGroup = null;
 
             base.Dispose();
         }
@@ -369,7 +369,7 @@ namespace Nexum.Server
 
         internal Task ScheduleAsync(Action<object, object> action, object context, object state, TimeSpan delay)
         {
-            return EventLoopGroup.ScheduleAsync(action, context, state, delay);
+            return _eventLoopGroup?.ScheduleAsync(action, context, state, delay);
         }
 
         private static NetSettings CreateNetSettings(NetSettings provided)
@@ -442,7 +442,7 @@ namespace Nexum.Server
                     session.ReliableUdpFrameMove(elapsedTime);
         }
 
-        private static void RetryUdpOrHolepunchIfRequired(object context, object _)
+        private static void CheckConnectTimeouts(object context, object _)
         {
             if (context == null)
                 return;
@@ -450,8 +450,43 @@ namespace Nexum.Server
             var server = (NetServer)context;
 
             foreach (var session in server.SessionsInternal.Values)
+            {
                 if (!session.IsConnected)
+                {
                     session.Dispose();
+                    continue;
+                }
+
+                if (session.ConnectionState == ConnectionState.Handshaking && !session.ConnectTimeoutSent)
+                {
+                    double timeSinceCreated = session.GetAbsoluteTime() - session.CreatedTime;
+
+                    if (timeSinceCreated >= NetConfig.ConnectTimeout)
+                    {
+                        session.Logger.Warning(
+                            "Connect timeout for hostId = {HostId} ({TimeSinceCreated:F1}s since connection, timeout = {Timeout}s)",
+                            session.HostId, timeSinceCreated, NetConfig.ConnectTimeout);
+
+                        session.ConnectTimeoutSent = true;
+
+                        var connectTimedoutMsg = new NetMessage();
+                        connectTimedoutMsg.WriteEnum(MessageType.ConnectServerTimedout);
+                        session.NexumToClient(connectTimedoutMsg);
+
+                        session.Dispose();
+                    }
+                }
+            }
+
+            server.ScheduleAsync(CheckConnectTimeouts, server, null, ConnectTimeoutCheckInterval);
+        }
+
+        private static void RetryUdpOrHolepunchIfRequired(object context, object _)
+        {
+            if (context == null)
+                return;
+
+            var server = (NetServer)context;
 
             if (!server.UdpEnabled)
                 return;
@@ -478,7 +513,7 @@ namespace Nexum.Server
                             server.SendUdpSocketRequest(session);
                         }
                     }
-                    else if (timeSinceLastPing >= UdpPingTimeout)
+                    else if (timeSinceLastPing >= TimeSpan.FromSeconds(HolepunchConfig.UdpPingTimeoutSeconds))
                     {
                         session.Logger.Debug("Fallback to TCP relay by server => {HostId}", session.HostId);
                         session.ResetUdp();

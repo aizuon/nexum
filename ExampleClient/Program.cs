@@ -1,5 +1,6 @@
 using System;
 using System.Net;
+using System.Threading;
 using System.Threading.Tasks;
 using BaseLib;
 using Nexum.Client;
@@ -10,11 +11,14 @@ namespace ExampleClient
 {
     public static class Program
     {
+        private static NetClient _client;
+
         public static async Task Main()
         {
             AppDomain.CurrentDomain.UnhandledException += Events.OnUnhandledException;
             TaskScheduler.UnobservedTaskException += Events.OnUnobservedTaskException;
             Console.CancelKeyPress += Events.OnCancelKeyPress;
+            AppDomain.CurrentDomain.ProcessExit += OnExit;
 
             Log.Logger = new LoggerConfiguration()
                 .WriteTo.Async(console =>
@@ -29,16 +33,23 @@ namespace ExampleClient
 #endif
                 .CreateLogger();
 
-            var client = new NetClient(ServerType.Relay);
-            client.OnConnected += () =>
+            _client = new NetClient(ServerType.Relay);
+            _client.OnConnected += () =>
             {
                 var enterServiceReq = new NetMessage();
 
-                client.RmiToServer(1, enterServiceReq);
+                _client.RmiToServer(1, enterServiceReq);
             };
-            await client.ConnectAsync(new IPEndPoint(IPAddress.Loopback, 28000));
+            await _client.ConnectAsync(new IPEndPoint(IPAddress.Loopback, 28000));
 
-            Console.ReadLine();
+            await Task.Delay(Timeout.Infinite);
+        }
+
+        private static async void OnExit(object sender, EventArgs e)
+        {
+            _client?.Dispose();
+
+            await Log.CloseAndFlushAsync();
         }
     }
 }
