@@ -44,8 +44,7 @@ namespace Nexum.Tests
             var message = new NetMessage();
             message.Write(new byte[] { 1, 2, 3, 4, 5 });
             var compressed = NetZip.CompressPacket(message);
-            var messageType = MessageType.None;
-            bool success = compressed.Read(ref messageType);
+            bool success = compressed.ReadEnum<MessageType>(out var messageType);
             Assert.True(success, "Should successfully read message type");
             Assert.Equal(MessageType.Compressed, messageType);
         }
@@ -57,8 +56,7 @@ namespace Nexum.Tests
             byte[] data = new byte[100];
             message.Write(data);
             var compressed = NetZip.CompressPacket(message);
-            var messageType = MessageType.None;
-            compressed.Read(ref messageType);
+            compressed.ReadEnum<MessageType>(out var messageType);
             long compressedSize = 0;
             long originalSize = 0;
             bool success1 = compressed.ReadScalar(ref compressedSize);
@@ -80,8 +78,7 @@ namespace Nexum.Tests
             original.Write(data);
 
             var compressed = NetZip.CompressPacket(original);
-            var messageType = MessageType.None;
-            compressed.Read(ref messageType);
+            compressed.ReadEnum<MessageType>(out var messageType);
             long compressedSize = 0;
             long originalSize = 0;
             compressed.ReadScalar(ref compressedSize);
@@ -144,8 +141,7 @@ namespace Nexum.Tests
             original.Write(data);
 
             var compressed = NetZip.CompressPacket(original);
-            var messageType = MessageType.None;
-            compressed.Read(ref messageType);
+            compressed.ReadEnum<MessageType>(out var messageType);
             long compressedSize = 0;
             long originalSize = 0;
             compressed.ReadScalar(ref compressedSize);

@@ -35,8 +35,7 @@ namespace Nexum.Client
         {
             message.WriteOffset = message.Length;
 
-            var messageType = MessageType.None;
-            if (!message.Read(ref messageType))
+            if (!message.ReadEnum<MessageType>(out var messageType))
                 return;
 
             if (udpEndPoint != null)
@@ -462,10 +461,9 @@ namespace Nexum.Client
                     }
                     else
                     {
-                        (var channel, var workerGroup, int newPort, _) =
+                        (var channel, int newPort, _) =
                             client.ConnectUdp();
                         p2pMember.PeerUdpChannel = channel;
-                        p2pMember.PeerUdpEventLoopGroup = workerGroup;
                         port = newPort;
                     }
 
@@ -873,10 +871,9 @@ namespace Nexum.Client
                                     return;
                                 }
 
-                                (var channel, var workerGroup, int port, _) =
+                                (var channel, int port, _) =
                                     client.ConnectUdp(targetPort);
                                 newMember.PeerUdpChannel = channel;
-                                newMember.PeerUdpEventLoopGroup = workerGroup;
                                 newMember.SelfUdpLocalSocket = new IPEndPoint(client.LocalIP, port);
 
                                 if (bindPort != 0 && port == bindPort)
@@ -920,16 +917,15 @@ namespace Nexum.Client
 
         private static void RMIHandler(NetClient client, NetMessage message, ushort filterTag, IPEndPoint udpEndPoint)
         {
-            ushort rmiId = 0;
-            if (!message.Read(ref rmiId))
+            if (!message.ReadEnum<NexumOpCode>(out var rmiId))
                 return;
 
-            switch ((NexumOpCode)rmiId)
+            switch (rmiId)
             {
                 case NexumOpCode.P2PGroup_MemberJoin:
                 case NexumOpCode.P2PGroup_MemberJoin_Unencrypted:
                 {
-                    HandleP2PGroupMemberJoin(client, message, (NexumOpCode)rmiId);
+                    HandleP2PGroupMemberJoin(client, message, rmiId);
                     break;
                 }
 
@@ -1023,9 +1019,8 @@ namespace Nexum.Client
                                 return;
                             }
 
-                            var (channel, workerGroup, _, _) = client.ConnectUdp();
+                            var (channel, _, _) = client.ConnectUdp();
                             client.UdpChannel = channel;
-                            client.UdpEventLoopGroup = workerGroup;
                             client.ServerUdpReadyWaiting = false;
 
                             var newSocketAck = new NetMessage();
@@ -1079,9 +1074,8 @@ namespace Nexum.Client
                                     return;
                                 }
 
-                                var (channel, workerGroup, _, _) = client.ConnectUdp();
+                                var (channel, _, _) = client.ConnectUdp();
                                 client.UdpChannel = channel;
-                                client.UdpEventLoopGroup = workerGroup;
                                 client.ServerUdpReadyWaiting = false;
 
                                 client.Logger.Debug("S2C_CreateUdpSocketAck => UDP socket created");
@@ -1135,10 +1129,9 @@ namespace Nexum.Client
                                 if (!targetPort.HasValue && p2pMember.PeerBindPort > 0)
                                     targetPort = p2pMember.PeerBindPort;
 
-                                (var channel, var workerGroup, int port, bool portReuseSuccess) =
+                                (var channel, int port, bool portReuseSuccess) =
                                     client.ConnectUdp(targetPort);
                                 p2pMember.PeerUdpChannel = channel;
-                                p2pMember.PeerUdpEventLoopGroup = workerGroup;
                                 p2pMember.SelfUdpLocalSocket = new IPEndPoint(client.LocalIP, port);
                                 p2pMember.LocalPortReuseSuccess = portReuseSuccess;
                             }
@@ -1440,10 +1433,9 @@ namespace Nexum.Client
 
                                 if (p2pMember.PeerUdpChannel == null)
                                 {
-                                    (var channel, var workerGroup, int port, _) =
+                                    (var channel, int port, _) =
                                         client.ConnectUdp();
                                     p2pMember.PeerUdpChannel = channel;
-                                    p2pMember.PeerUdpEventLoopGroup = workerGroup;
                                     client.Logger.Debug(
                                         "RenewP2PConnectionState => pre-created P2P UDP socket on port {Port}", port);
                                 }
@@ -1547,7 +1539,7 @@ namespace Nexum.Client
                 }
 
                 default:
-                    client.OnRMIReceive(message, rmiId);
+                    client.OnRMIReceive(message, (ushort)rmiId);
                     break;
             }
         }

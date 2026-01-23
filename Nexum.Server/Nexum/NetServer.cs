@@ -215,7 +215,8 @@ namespace Nexum.Server
                 foreach (uint port in udpListenerPorts)
                 {
                     var udpSocket = new UdpSocket(this);
-                    await udpSocket.ListenAsync(((IPEndPoint)Channel.LocalAddress).Address.MapToIPv4(), (int)port);
+                    await udpSocket.ListenAsync(((IPEndPoint)Channel.LocalAddress).Address.MapToIPv4(), (int)port,
+                        _eventLoopGroup);
                     UdpSockets.TryAdd(port, udpSocket);
                 }
 

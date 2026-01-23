@@ -22,11 +22,19 @@ namespace Nexum.Core
             {
                 zlib.Write(message.GetBufferSpan());
                 zlib.Close();
-                byte[] array = mem.ToArray();
+
                 compressedMessage.WriteEnum(MessageType.Compressed);
-                compressedMessage.WriteScalar(array.Length);
+
+                ArraySegment<byte> buffer;
+                if (!mem.TryGetBuffer(out buffer))
+                {
+                    byte[] array = mem.ToArray();
+                    buffer = new ArraySegment<byte>(array);
+                }
+
+                compressedMessage.WriteScalar(buffer.Count);
                 compressedMessage.WriteScalar(message.Length);
-                compressedMessage.Write(array);
+                compressedMessage.Write(buffer.AsSpan());
             }
 
             return compressedMessage;
@@ -65,7 +73,10 @@ namespace Nexum.Core
                         ArrayPool<byte>.Shared.Return(buffer);
                     }
 
-                    decompressedMessage.Write(outputStream.ToArray());
+                    if (outputStream.TryGetBuffer(out var outBuffer))
+                        decompressedMessage.Write(outBuffer.AsSpan());
+                    else
+                        decompressedMessage.Write(outputStream.ToArray());
                 }
             }
             catch (Exception e)

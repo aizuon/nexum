@@ -42,6 +42,8 @@ namespace BaseLib
             0xB3667A2E, 0xC4614AB8, 0x5D681B02, 0x2A6F2B94, 0xB40BBE37, 0xC30C8EA1, 0x5A05DF1B, 0x2D02EF8D
         };
 
+        private static readonly uint[][] s_tables = CreateSlicingBy8Tables();
+
         private uint _checksum;
 
         public CRC32()
@@ -58,18 +60,12 @@ namespace BaseLib
 
         protected override void HashCore(byte[] array, int ibStart, int cbSize)
         {
-            HashCore(array.AsSpan(ibStart, cbSize - ibStart));
+            HashCore(array.AsSpan(ibStart, cbSize));
         }
 
         protected override void HashCore(ReadOnlySpan<byte> source)
         {
-            uint checksum = _checksum;
-            uint[] table = s_table;
-
-            foreach (byte b in source)
-                checksum = (checksum >> 8) ^ table[(checksum & 0xFF) ^ b];
-
-            _checksum = checksum;
+            _checksum = Update(_checksum, source);
         }
 
         protected override byte[] HashFinal()
@@ -96,13 +92,62 @@ namespace BaseLib
 
         public static uint Compute(ReadOnlySpan<byte> data)
         {
-            uint checksum = 0xFFFFFFFF;
-            uint[] table = s_table;
-
-            foreach (byte b in data)
-                checksum = (checksum >> 8) ^ table[(checksum & 0xFF) ^ b];
-
+            uint checksum = Update(0xFFFFFFFF, data);
             return ~checksum;
+        }
+
+        private static uint Update(uint checksum, ReadOnlySpan<byte> source)
+        {
+            uint[][] tables = s_tables;
+            uint[] table0 = tables[0];
+
+            int offset = 0;
+            int length = source.Length;
+
+            while (length - offset >= 8)
+            {
+                ulong block = BinaryPrimitives.ReadUInt64LittleEndian(source.Slice(offset, 8));
+                block ^= checksum;
+
+                checksum =
+                    tables[7][(byte)block] ^
+                    tables[6][(byte)(block >> 8)] ^
+                    tables[5][(byte)(block >> 16)] ^
+                    tables[4][(byte)(block >> 24)] ^
+                    tables[3][(byte)(block >> 32)] ^
+                    tables[2][(byte)(block >> 40)] ^
+                    tables[1][(byte)(block >> 48)] ^
+                    tables[0][(byte)(block >> 56)];
+
+                offset += 8;
+            }
+
+            for (; offset < length; offset++)
+                checksum = (checksum >> 8) ^ table0[(byte)(checksum ^ source[offset])];
+
+            return checksum;
+        }
+
+        private static uint[][] CreateSlicingBy8Tables()
+        {
+            uint[][] tables = new uint[8][];
+            tables[0] = s_table;
+
+            for (int t = 1; t < tables.Length; t++)
+            {
+                uint[] prev = tables[t - 1];
+                uint[] current = new uint[s_table.Length];
+
+                for (int i = 0; i < current.Length; i++)
+                {
+                    uint crc = prev[i];
+                    current[i] = (crc >> 8) ^ s_table[crc & 0xFF];
+                }
+
+                tables[t] = current;
+            }
+
+            return tables;
         }
     }
 }

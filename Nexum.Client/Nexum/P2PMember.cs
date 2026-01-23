@@ -53,7 +53,6 @@ namespace Nexum.Client
         internal double PeerServerPingInternal;
 
         internal IChannel PeerUdpChannel;
-        internal IEventLoopGroup PeerUdpEventLoopGroup;
         internal IPEndPoint PeerUdpLocalSocket;
 
         internal Guid PeerUdpMagicNumber;
@@ -208,9 +207,8 @@ namespace Nexum.Client
                 if (PeerUdpChannel == null && SelfUdpLocalSocket != null)
                 {
                     int? targetPort = SelfUdpLocalSocket.Port;
-                    (var channel, var workerGroup, int port, _) = Owner.ConnectUdp(targetPort);
+                    (var channel, int port, _) = Owner.ConnectUdp(targetPort);
                     PeerUdpChannel = channel;
-                    PeerUdpEventLoopGroup = workerGroup;
                     SelfUdpLocalSocket = new IPEndPoint(Owner.LocalIP, port);
                 }
 
@@ -351,16 +349,13 @@ namespace Nexum.Client
             if (shouldRecycleSocket && wasDirectP2P && PeerUdpChannel != null && PeerUdpChannel.Active && localPort > 0)
             {
                 Logger.Debug("Recycling P2P UDP socket on port {Port} for hostId = {HostId}", localPort, HostId);
-                Owner.RecycleUdpSocket(PeerUdpChannel, PeerUdpEventLoopGroup, localPort);
+                Owner.RecycleUdpSocket(PeerUdpChannel, localPort);
                 PeerUdpChannel = null;
-                PeerUdpEventLoopGroup = null;
             }
             else
             {
                 PeerUdpChannel?.CloseAsync();
                 PeerUdpChannel = null;
-                PeerUdpEventLoopGroup?.ShutdownGracefullyAsync(TimeSpan.Zero, TimeSpan.Zero);
-                PeerUdpEventLoopGroup = null;
             }
 
             PeerLocalToRemoteSocket = null;

@@ -121,7 +121,6 @@ namespace Nexum.Client
 
         internal IChannel UdpChannel;
         internal UdpPacketDefragBoard UdpDefragBoard;
-        internal IEventLoopGroup UdpEventLoopGroup;
         internal UdpPacketFragBoard UdpFragBoard;
         internal Guid UdpMagicNumber;
 
@@ -224,7 +223,7 @@ namespace Nexum.Client
             SetConnectionState(ConnectionState.Connecting);
             Logger.Debug("Connecting to {Endpoint} with timeout {Timeout}s", ipEndPoint.ToIPv4String(),
                 NetConfig.TcpSocketConnectTimeout);
-            _eventLoopGroup = new MultithreadEventLoopGroup();
+            _eventLoopGroup = new MultithreadEventLoopGroup(Math.Clamp(Environment.ProcessorCount / 2, 1, 4));
 
             var connectTask = new Bootstrap()
                 .Group(_eventLoopGroup)
@@ -377,8 +376,6 @@ namespace Nexum.Client
 
             UdpChannel?.CloseAsync();
             UdpChannel = null;
-            UdpEventLoopGroup?.ShutdownGracefullyAsync(TimeSpan.Zero, TimeSpan.Zero);
-            UdpEventLoopGroup = null;
             Channel?.CloseAsync();
             Channel = null;
             _eventLoopGroup?.ShutdownGracefullyAsync(TimeSpan.Zero, TimeSpan.Zero);
@@ -434,7 +431,7 @@ namespace Nexum.Client
                 OnDisconnected();
         }
 
-        internal (IChannel Channel, IEventLoopGroup WorkerGroup, int Port, bool PortReuseSuccess)
+        internal (IChannel Channel, int Port, bool PortReuseSuccess)
             ConnectUdp(
                 int? targetPort = null)
         {
@@ -445,7 +442,7 @@ namespace Nexum.Client
                     recycled.RecycleTime = 0.0;
                     recycled.Garbaged = false;
                     Logger.Debug("Reusing recycled UDP socket on port {Port}", recycled.Port);
-                    return (recycled.Channel, recycled.EventLoopGroup, recycled.Port, true);
+                    return (recycled.Channel, recycled.Port, true);
                 }
 
                 GarbageSocket(recycled);
@@ -454,7 +451,6 @@ namespace Nexum.Client
             _udpConnectMutex.WaitOne();
             try
             {
-                var workerGroup = new SingleThreadEventLoop();
                 int aimPort = targetPort ?? AimForPort;
                 int port = NetUtil.GetAvailablePort(aimPort);
                 bool portReuseSuccess = targetPort.HasValue && port == targetPort.Value;
@@ -462,7 +458,7 @@ namespace Nexum.Client
                 AimForPort = (ushort)(port + 1);
 
                 var channel = new Bootstrap()
-                    .Group(workerGroup)
+                    .Group(_eventLoopGroup)
                     .Channel<SocketDatagramChannel>()
                     .Handler(new ActionChannelInitializer<IChannel>(ch =>
                     {
@@ -494,7 +490,7 @@ namespace Nexum.Client
                     NetUtil.ReleasePort(port);
                 });
 
-                return (channel, workerGroup, port, portReuseSuccess);
+                return (channel, port, portReuseSuccess);
             }
             finally
             {
@@ -502,7 +498,7 @@ namespace Nexum.Client
             }
         }
 
-        internal void RecycleUdpSocket(IChannel channel, IEventLoopGroup eventLoopGroup, int port)
+        internal void RecycleUdpSocket(IChannel channel, int port)
         {
             if (channel == null || !channel.Active)
             {
@@ -510,7 +506,7 @@ namespace Nexum.Client
                 return;
             }
 
-            var recycled = new RecycledUdpSocket(channel, eventLoopGroup, port, GetAbsoluteTime());
+            var recycled = new RecycledUdpSocket(channel, port, GetAbsoluteTime());
             if (RecycledSockets.TryAdd((ushort)port, recycled))
             {
                 Logger.Debug("Recycled UDP socket on port {Port}", port);
@@ -532,7 +528,6 @@ namespace Nexum.Client
             Logger.Debug("Garbage collecting UDP socket on port {Port}", recycled.Port);
 
             recycled.Channel?.CloseAsync();
-            recycled.EventLoopGroup?.ShutdownGracefullyAsync(TimeSpan.Zero, TimeSpan.Zero);
         }
 
         private void StartRecycleGarbageCollectLoopIfNeeded()
@@ -598,8 +593,6 @@ namespace Nexum.Client
 
             UdpChannel?.CloseAsync();
             UdpChannel = null;
-            UdpEventLoopGroup?.ShutdownGracefullyAsync(TimeSpan.Zero, TimeSpan.Zero);
-            UdpEventLoopGroup = null;
 
             ServerUdpSocket = null;
             ServerUdpLastReceivedTime = 0;

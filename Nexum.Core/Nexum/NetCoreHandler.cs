@@ -10,15 +10,14 @@ namespace Nexum.Core
             NetCrypt crypt,
             Action<NetMessage> readMessageCallback)
         {
-            byte encryptMode = 0;
             var encryptedPayload = new ByteArray();
 
-            if (!message.Read(ref encryptMode) || !message.Read(ref encryptedPayload))
+            if (!message.ReadEnum<EncryptMode>(out var encryptMode) || !message.Read(ref encryptedPayload))
                 return false;
 
             byte[] decryptedBuffer = crypt.Decrypt(
                 encryptedPayload.GetBufferSpan(),
-                (EncryptMode)encryptMode
+                encryptMode
             );
 
             var decryptedMessage = new NetMessage(decryptedBuffer, true);

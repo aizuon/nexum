@@ -1,4 +1,3 @@
-using System;
 using System.Net;
 using System.Threading.Tasks;
 using DotNetty.Transport.Bootstrapping;
@@ -17,7 +16,6 @@ namespace Nexum.Server
         private ILogger _logger = Log.ForContext(Constants.SourceContextPropertyName, nameof(UdpSocket));
 
         internal int Port;
-        internal IEventLoopGroup WorkerGroup;
 
         internal UdpSocket(NetServer owner)
         {
@@ -26,13 +24,12 @@ namespace Nexum.Server
 
         internal IChannel Channel { get; private set; }
 
-        internal async Task ListenAsync(IPAddress udpAddress, int listenerPort)
+        internal async Task ListenAsync(IPAddress udpAddress, int listenerPort, IEventLoopGroup eventLoopGroup)
         {
             Port = listenerPort;
             _logger = Log.ForContext(Constants.SourceContextPropertyName, $"{nameof(UdpSocket)}({Port})");
-            WorkerGroup = new MultithreadEventLoopGroup();
             Channel = await new Bootstrap()
-                .Group(WorkerGroup)
+                .Group(eventLoopGroup)
                 .Channel<SocketDatagramChannel>()
                 .Handler(new ActionChannelInitializer<IChannel>(ch =>
                 {
@@ -50,8 +47,6 @@ namespace Nexum.Server
             _logger.Debug("Closing UDP socket on port {Port}", Port);
             Channel?.CloseAsync();
             Channel = null;
-            WorkerGroup?.ShutdownGracefullyAsync(TimeSpan.Zero, TimeSpan.Zero);
-            WorkerGroup = null;
         }
     }
 }

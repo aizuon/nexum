@@ -4,17 +4,15 @@ namespace Nexum.Client
 {
     internal sealed class RecycledUdpSocket
     {
-        internal RecycledUdpSocket(IChannel channel, IEventLoopGroup eventLoopGroup, int port, double recycleTime)
+        internal RecycledUdpSocket(IChannel channel, int port, double recycleTime)
         {
             Channel = channel;
-            EventLoopGroup = eventLoopGroup;
+
             Port = port;
             RecycleTime = recycleTime;
         }
 
         internal IChannel Channel { get; }
-
-        internal IEventLoopGroup EventLoopGroup { get; }
 
         internal int Port { get; }
 

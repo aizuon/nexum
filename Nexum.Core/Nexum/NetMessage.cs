@@ -44,16 +44,6 @@ namespace Nexum.Core
 
         internal byte[] Buffer => GetBuffer();
 
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        internal bool Read(ref MessageType obj)
-        {
-            byte num = 0;
-            if (!Read(ref num))
-                return false;
-            obj = (MessageType)num;
-            return true;
-        }
-
         public void Write(NetMessage obj)
         {
             Write(obj.GetBufferSpan());
@@ -64,37 +54,13 @@ namespace Nexum.Core
         public void Write(string obj, bool unicode = false)
         {
             Write(unicode ? (byte)2 : (byte)1);
-            if (unicode)
-            {
-                int maxByteCount = obj.Length * 2;
-                if (maxByteCount <= 256)
-                {
-                    Span<byte> buffer = stackalloc byte[maxByteCount];
-                    int bytesWritten = Encoding.Unicode.GetBytes(obj, buffer);
-                    WriteScalar(bytesWritten / 2);
-                    Write(buffer.Slice(0, bytesWritten));
-                }
-                else
-                {
-                    byte[] bytes = Encoding.Unicode.GetBytes(obj);
-                    WriteScalar(bytes.Length / 2);
-                    Write(bytes);
-                }
-            }
-            else
-            {
-                WriteScalar(obj.Length);
-                if (obj.Length <= 256)
-                {
-                    Span<byte> buffer = stackalloc byte[obj.Length];
-                    Latin1Encoding.GetBytes(obj, buffer);
-                    Write(buffer);
-                }
-                else
-                {
-                    Write(Latin1Encoding.GetBytes(obj));
-                }
-            }
+
+            var encoding = unicode ? Encoding.Unicode : Latin1Encoding;
+            WriteScalar(obj.Length);
+
+            int byteCount = encoding.GetByteCount(obj);
+            var targetSpan = GetWritableSpan(byteCount);
+            encoding.GetBytes(obj, targetSpan);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -143,14 +109,14 @@ namespace Nexum.Core
         public bool Read(out Version value)
         {
             value = new Version();
-            int num1 = 0;
-            ushort num2 = 0;
-            ushort num3 = 0;
-            ushort num4 = 0;
-            ushort num5 = 0;
-            if (!Read(ref num1) || !Read(ref num3) || !Read(ref num2) || !Read(ref num4) || !Read(ref num5))
+            int array = 0;
+            ushort major = 0;
+            ushort minor = 0;
+            ushort build = 0;
+            ushort revision = 0;
+            if (!Read(ref array) || !Read(ref major) || !Read(ref minor) || !Read(ref build) || !Read(ref revision))
                 return false;
-            value = new Version(num3, num2, num4, num5);
+            value = new Version(major, minor, build, revision);
             return true;
         }
 
@@ -177,7 +143,7 @@ namespace Nexum.Core
         {
             Span<byte> addressBytes = stackalloc byte[4];
             b.Address.TryWriteBytes(addressBytes, out _);
-            Write((uint)((addressBytes[3] << 24) + (addressBytes[2] << 16) + (addressBytes[1] << 8)) + addressBytes[0]);
+            Write(BinaryPrimitives.ReadUInt32LittleEndian(addressBytes));
             Write((ushort)b.Port);
         }
 

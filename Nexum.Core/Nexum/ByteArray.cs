@@ -61,6 +61,15 @@ namespace Nexum.Core
             return _buffer.AsSpan(0, Length);
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Span<byte> GetWritableSpan(int length)
+        {
+            EnsureCapacity(WriteOffset + length);
+            var result = _buffer.AsSpan(WriteOffset, length);
+            WriteOffset += length;
+            return result;
+        }
+
         public virtual void Shrink()
         {
             int newLength = _buffer.Length - ReadOffset;
@@ -275,8 +284,8 @@ namespace Nexum.Core
             long length = 0;
             if (ReadScalar(ref length))
             {
-                byte[] data = GC.AllocateUninitializedArray<byte>((int)length);
-                if (Read(ref data, data.Length))
+                byte[] data = null;
+                if (Read(ref data, (int)length))
                 {
                     obj = new ByteArray(data, data.Length, true);
                     return true;
@@ -288,7 +297,7 @@ namespace Nexum.Core
 
         public bool Read(ref ByteArray obj, int length)
         {
-            byte[] data = GC.AllocateUninitializedArray<byte>(length);
+            byte[] data = null;
             if (!Read(ref data, length))
                 return false;
             obj = new ByteArray(data, length, true);
@@ -297,14 +306,14 @@ namespace Nexum.Core
 
         public bool ReadBytes(out byte[] obj, int length)
         {
-            obj = GC.AllocateUninitializedArray<byte>(length);
+            obj = null;
             return Read(ref obj, length);
         }
 
         public bool ReadAll(out byte[] obj)
         {
             int length = _buffer.Length - ReadOffset;
-            obj = GC.AllocateUninitializedArray<byte>(length);
+            obj = null;
 
             return Read(ref obj, length);
         }
@@ -475,11 +484,62 @@ namespace Nexum.Core
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public void WriteAt(int offset, byte[] bytes)
+        public bool ReadEnum<T>(out T value) where T : struct, Enum
         {
-            if (offset + bytes.Length > _buffer.Length)
-                return;
-            Buffer.BlockCopy(bytes, 0, _buffer, offset, bytes.Length);
+            if (Unsafe.SizeOf<T>() == 1)
+            {
+                byte temp = 0;
+                if (!Read(ref temp))
+                {
+                    value = default(T);
+                    return false;
+                }
+
+                value = Unsafe.As<byte, T>(ref temp);
+                return true;
+            }
+
+            if (Unsafe.SizeOf<T>() == 2)
+            {
+                short temp = 0;
+                if (!Read(ref temp))
+                {
+                    value = default(T);
+                    return false;
+                }
+
+                value = Unsafe.As<short, T>(ref temp);
+                return true;
+            }
+
+            if (Unsafe.SizeOf<T>() == 4)
+            {
+                int temp = 0;
+                if (!Read(ref temp))
+                {
+                    value = default(T);
+                    return false;
+                }
+
+                value = Unsafe.As<int, T>(ref temp);
+                return true;
+            }
+
+            if (Unsafe.SizeOf<T>() == 8)
+            {
+                long temp = 0;
+                if (!Read(ref temp))
+                {
+                    value = default(T);
+                    return false;
+                }
+
+                value = Unsafe.As<long, T>(ref temp);
+                return true;
+            }
+
+            value = default(T);
+            throw new NotSupportedException("Enum size is not supported");
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]

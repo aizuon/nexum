@@ -57,8 +57,8 @@ namespace Nexum.Server
 
                 var holepunchMessage = new NetMessage(holepunchPacket.Packet.AssembledData, true);
 
-                holepunchMessage.Read(out byte coreid);
-                var messageType = (MessageType)coreid;
+                if (!holepunchMessage.ReadEnum<MessageType>(out var messageType))
+                    return;
 
                 if (messageType != MessageType.ServerHolepunch)
                 {

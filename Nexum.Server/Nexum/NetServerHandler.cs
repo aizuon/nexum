@@ -34,8 +34,7 @@ namespace Nexum.Server
         {
             message.WriteOffset = message.Length;
 
-            var messageType = MessageType.None;
-            if (!message.Read(ref messageType))
+            if (!message.ReadEnum<MessageType>(out var messageType))
                 return;
 
             if (udpEndPoint != null)
@@ -615,11 +614,10 @@ namespace Nexum.Server
 
         private static void RMIHandler(NetServer server, NetSession session, NetMessage message)
         {
-            ushort rmiId = 0;
-            if (!message.Read(ref rmiId))
+            if (!message.ReadEnum<NexumOpCode>(out var rmiId))
                 return;
 
-            switch ((NexumOpCode)rmiId)
+            switch (rmiId)
             {
                 case NexumOpCode.ReliablePing:
                     session.RmiToClient((ushort)NexumOpCode.ReliablePong, new NetMessage());
@@ -960,7 +958,7 @@ namespace Nexum.Server
                     break;
 
                 default:
-                    server.OnRMIReceive(session, message, rmiId);
+                    server.OnRMIReceive(session, message, (ushort)rmiId);
                     break;
             }
         }

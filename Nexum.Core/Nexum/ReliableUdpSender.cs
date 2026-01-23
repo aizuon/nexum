@@ -6,9 +6,9 @@ namespace Nexum.Core
 {
     internal sealed class ReliableUdpSender
     {
-        private readonly List<SenderFrame> _firstSenderWindow = new List<SenderFrame>(32);
+        private readonly Stack<SenderFrame> _firstSenderWindow = new Stack<SenderFrame>(64);
         private readonly ReliableUdpHost _owner;
-        private readonly List<SenderFrame> _resendWindow = new List<SenderFrame>(64);
+        private readonly List<SenderFrame> _resendWindow = new List<SenderFrame>(256);
         private readonly StreamQueue _sendStream = new StreamQueue();
 
         private uint _currentFrameNumber;
@@ -100,7 +100,7 @@ namespace Nexum.Core
                     Type = ReliableUdpFrameType.Data
                 };
 
-                _firstSenderWindow.Insert(0, senderFrame);
+                _firstSenderWindow.Push(senderFrame);
                 _sendStream.PopFront(frameLength);
             }
         }
@@ -153,9 +153,9 @@ namespace Nexum.Core
             double recentPing = _owner.GetRecentPing();
             bool isReliableChannel = _owner.IsReliableChannel();
 
-            for (int i = _firstSenderWindow.Count - 1; i >= 0; i--)
+            while (_firstSenderWindow.Count > 0)
             {
-                var frame = _firstSenderWindow[i];
+                var frame = _firstSenderWindow.Pop();
                 frame.LastSendTime = currentTime;
                 frame.FirstSendTime = currentTime;
                 frame.ResendCoolTime = recentPing > 0 ? recentPing * 2.0 : ReliableUdpConfig.FirstResendCoolTime;
@@ -166,8 +166,6 @@ namespace Nexum.Core
 
                 if (!isReliableChannel)
                     _resendWindow.Add(frame);
-
-                _firstSenderWindow.RemoveAt(i);
             }
         }
 

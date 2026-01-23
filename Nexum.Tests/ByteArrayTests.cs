@@ -356,20 +356,6 @@ namespace Nexum.Tests
         }
 
         [Fact]
-        public void WriteAt_UpdatesDataAtOffset()
-        {
-            var byteArray = new ByteArray();
-            byte[] data = { 1, 2, 3, 4, 5 };
-            byteArray.Write(data);
-
-            byteArray.WriteAt(2, new byte[] { 99, 88 });
-
-            byte[] buffer = byteArray.GetBuffer();
-            Assert.Equal(99, buffer[2]);
-            Assert.Equal(88, buffer[3]);
-        }
-
-        [Fact]
         public void WriteEnum_WritesEnumValue()
         {
             var byteArray = new ByteArray();

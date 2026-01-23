@@ -87,8 +87,7 @@ namespace Nexum.Tests
             var message = new NetMessage();
             var expected = MessageType.Compressed;
             message.WriteEnum(expected);
-            var result = MessageType.None;
-            bool success = message.Read(ref result);
+            bool success = message.ReadEnum<MessageType>(out var result);
             Assert.True(success, "Should successfully read MessageType");
             Assert.Equal(expected, result);
         }
