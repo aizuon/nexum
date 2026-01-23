@@ -669,6 +669,8 @@ namespace Nexum.Client
                 selfSendAddr
             );
 
+            p2pMember.RmiToPeer((ushort)NexumOpCode.HolsterP2PHolepunchTrial, new NetMessage(), reliable: true);
+
             var notifyP2PHolepunchSuccess = new NetMessage();
             notifyP2PHolepunchSuccess.Write(client.HostId);
             notifyP2PHolepunchSuccess.Write(hostId);
@@ -1466,6 +1468,26 @@ namespace Nexum.Client
 
                 case NexumOpCode.ReliablePong:
                 {
+                    break;
+                }
+
+                case NexumOpCode.HolsterP2PHolepunchTrial:
+                {
+                    var p2pMember =
+                        client.P2PGroup?.FindMember(client.HostId, udpEndPoint, filterTag, message.RelayFrom);
+                    if (p2pMember != null)
+                    {
+                        client.Logger.Debug(
+                            "HolsterP2PHolepunchTrial => peer {HostId} requested to stop holepunch trial",
+                            p2pMember.HostId);
+
+                        lock (p2pMember.P2PMutex)
+                        {
+                            p2pMember.P2PHolepunchStarted = false;
+                            p2pMember.P2PHolepunchInitiated = false;
+                        }
+                    }
+
                     break;
                 }
 
