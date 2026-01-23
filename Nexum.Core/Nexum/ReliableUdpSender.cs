@@ -25,24 +25,24 @@ namespace Nexum.Core
         private int _remoteReceiveSpeed = ReliableUdpConfig.ReceiveSpeedBeforeUpdate;
         private int _sendSpeedLimit = ReliableUdpConfig.MaxSendSpeedInFrameCount;
 
-        public ReliableUdpSender(ReliableUdpHost owner, uint firstFrameNumber)
+        internal ReliableUdpSender(ReliableUdpHost owner, uint firstFrameNumber)
         {
             _owner = owner;
             _currentFrameNumber = firstFrameNumber;
         }
 
-        public uint NextFrameNumber => _currentFrameNumber++;
+        internal uint NextFrameNumber => _currentFrameNumber++;
 
-        public int PendingFrameCount => _firstSenderWindow.Count + _resendWindow.Count;
-        public int SendStreamLength => _sendStream.Length;
+        internal int PendingFrameCount => _firstSenderWindow.Count + _resendWindow.Count;
+        internal int SendStreamLength => _sendStream.Length;
 
-        public void Send(byte[] data, int length)
+        internal void Send(byte[] data, int length)
         {
             _sendStream.PushBack(data, length);
             StreamToSenderWindowOnNeed(false);
         }
 
-        public void FrameMove(double currentTime, double elapsedTime)
+        internal void FrameMove(double currentTime, double elapsedTime)
         {
             CalcRecentSendSpeed(currentTime);
             UpdateSendSpeedLimit();
@@ -51,7 +51,7 @@ namespace Nexum.Core
             FirstSenderWindowToUdpOnNeed(currentTime);
         }
 
-        public void ProcessAckFrame(ReliableUdpFrame frame)
+        internal void ProcessAckFrame(ReliableUdpFrame frame)
         {
             uint[] ackedFrames = frame.AckedFrameNumbers.Uncompress();
             int ackedCount = ackedFrames.Length;
@@ -71,7 +71,7 @@ namespace Nexum.Core
             _remoteReceiveSpeed = (int)SysUtil.Lerp(_remoteReceiveSpeed, frame.RecentReceiveSpeed, 0.9) + 1;
         }
 
-        public void StreamToSenderWindowOnNeed(bool moveNow)
+        internal void StreamToSenderWindowOnNeed(bool moveNow)
         {
             double currentTime = _owner.GetAbsoluteTime();
 
@@ -105,7 +105,7 @@ namespace Nexum.Core
             }
         }
 
-        public bool HasFailed(double currentTime)
+        internal bool HasFailed(double currentTime)
         {
             int count = _resendWindow.Count;
             for (int i = 0; i < count; i++)
@@ -262,13 +262,13 @@ namespace Nexum.Core
 
         private sealed class SenderFrame
         {
-            public byte[] Data;
-            public double FirstSendTime;
-            public uint FrameNumber;
-            public double LastSendTime;
-            public double ResendCoolTime;
-            public int ResendCount;
-            public ReliableUdpFrameType Type;
+            internal byte[] Data;
+            internal double FirstSendTime;
+            internal uint FrameNumber;
+            internal double LastSendTime;
+            internal double ResendCoolTime;
+            internal int ResendCount;
+            internal ReliableUdpFrameType Type;
         }
     }
 }

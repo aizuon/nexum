@@ -6,38 +6,38 @@ namespace Nexum.Core
     {
         private readonly object _lock = new object();
 
-        public ReliableUdpHost(uint firstFrameNumber)
+        internal ReliableUdpHost(uint firstFrameNumber)
             : this(firstFrameNumber, firstFrameNumber)
         {
         }
 
-        public ReliableUdpHost(uint senderFirstFrameNumber, uint receiverExpectedFrameNumber)
+        internal ReliableUdpHost(uint senderFirstFrameNumber, uint receiverExpectedFrameNumber)
         {
             Sender = new ReliableUdpSender(this, senderFirstFrameNumber);
             Receiver = new ReliableUdpReceiver(this, receiverExpectedFrameNumber);
         }
 
-        public Func<double> GetAbsoluteTime { get; set; } = () => 0.0;
+        internal Func<double> GetAbsoluteTime { get; set; } = () => 0.0;
 
-        public Func<double> GetRecentPing { get; set; } = () => 0.0;
+        internal Func<double> GetRecentPing { get; set; } = () => 0.0;
 
-        public Func<uint> GetUdpSendBufferPacketFilledCount { get; set; } = () => 0;
+        internal Func<uint> GetUdpSendBufferPacketFilledCount { get; set; } = () => 0;
 
-        public Func<bool> IsReliableChannel { get; set; } = () => false;
+        internal Func<bool> IsReliableChannel { get; set; } = () => false;
 
-        public Action<ReliableUdpFrame> SendOneFrameToUdpLayer { get; set; } = _ => { };
+        internal Action<ReliableUdpFrame> SendOneFrameToUdpLayer { get; set; } = _ => { };
 
-        public ReliableUdpSender Sender { get; }
+        internal ReliableUdpSender Sender { get; }
 
-        public ReliableUdpReceiver Receiver { get; }
+        internal ReliableUdpReceiver Receiver { get; }
 
-        public StreamQueue ReceivedStream => Receiver.ReceivedStream;
-        public uint ExpectedFrameNumber => Receiver.ExpectedFrameNumber;
-        public bool Failed { get; private set; }
+        internal StreamQueue ReceivedStream => Receiver.ReceivedStream;
+        internal uint ExpectedFrameNumber => Receiver.ExpectedFrameNumber;
+        internal bool Failed { get; private set; }
 
-        public event Action OnFailed;
+        internal event Action OnFailed;
 
-        public void Send(byte[] data, int length)
+        internal void Send(byte[] data, int length)
         {
             lock (_lock)
             {
@@ -48,7 +48,7 @@ namespace Nexum.Core
             }
         }
 
-        public void TakeReceivedFrame(ReliableUdpFrame frame)
+        internal void TakeReceivedFrame(ReliableUdpFrame frame)
         {
             lock (_lock)
             {
@@ -59,7 +59,7 @@ namespace Nexum.Core
             }
         }
 
-        public void FrameMove(double elapsedTime)
+        internal void FrameMove(double elapsedTime)
         {
             Action failedCallback = null;
 
@@ -83,7 +83,7 @@ namespace Nexum.Core
             failedCallback?.Invoke();
         }
 
-        public uint YieldFrameNumber()
+        internal uint YieldFrameNumber()
         {
             lock (_lock)
             {
@@ -91,7 +91,7 @@ namespace Nexum.Core
             }
         }
 
-        public void FlushSendStream()
+        internal void FlushSendStream()
         {
             lock (_lock)
             {
@@ -99,7 +99,7 @@ namespace Nexum.Core
             }
         }
 
-        public void Reset(uint firstFrameNumber)
+        internal void Reset(uint firstFrameNumber)
         {
             lock (_lock)
             {
@@ -112,7 +112,7 @@ namespace Nexum.Core
             SendOneFrameToUdpLayer(frame);
         }
 
-        public ReliableUdpStats GetStats()
+        internal ReliableUdpStats GetStats()
         {
             lock (_lock)
             {
@@ -131,11 +131,11 @@ namespace Nexum.Core
 
     internal sealed class ReliableUdpStats
     {
-        public int ReceivedStreamCount { get; set; }
-        public uint ExpectedFrameNumber { get; set; }
-        public int RecentReceiveSpeed { get; set; }
-        public int SendStreamCount { get; set; }
-        public int PendingFrameCount { get; set; }
-        public bool Failed { get; set; }
+        internal int ReceivedStreamCount { get; set; }
+        internal uint ExpectedFrameNumber { get; set; }
+        internal int RecentReceiveSpeed { get; set; }
+        internal int SendStreamCount { get; set; }
+        internal int PendingFrameCount { get; set; }
+        internal bool Failed { get; set; }
     }
 }

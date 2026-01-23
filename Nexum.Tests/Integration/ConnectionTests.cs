@@ -34,7 +34,7 @@ namespace Nexum.Tests.Integration
             var session = Server.Sessions.Values.First();
             Assert.Equal(client.HostId, session.HostId);
             Assert.True(session.IsConnected, "Session should be connected");
-            Assert.Equal(Server.ServerGuid, client.ServerGuid);
+            Assert.Equal(Server.ServerInstanceGuid, client.ServerInstanceGuid);
 
             Assert.NotNull(client.NetSettings);
             Assert.Equal(customSettings.MessageMaxLength, client.NetSettings.MessageMaxLength);
@@ -54,7 +54,7 @@ namespace Nexum.Tests.Integration
             await Task.Delay(300);
             client.Dispose();
 
-            await WaitForConditionAsync(() => Server.Sessions.Count == 0, ConnectionTimeout);
+            await WaitForConditionAsync(() => Server.Sessions.Count == 0, GetAdjustedTimeout(ConnectionTimeout));
             Assert.Empty(Server.Sessions);
         }
 
@@ -95,8 +95,8 @@ namespace Nexum.Tests.Integration
                 session.RmiToClient(4002, serverMsg, EncryptMode.None);
             }
 
-            Assert.True(serverDone.Wait(MessageTimeout), "Server should receive all messages");
-            Assert.True(clientDone.Wait(MessageTimeout), "Client should receive all messages");
+            Assert.True(serverDone.Wait(GetAdjustedTimeout(MessageTimeout)), "Server should receive all messages");
+            Assert.True(clientDone.Wait(GetAdjustedTimeout(MessageTimeout)), "Client should receive all messages");
             Assert.Equal(expectedMessages, serverReceived);
             Assert.Equal(expectedMessages, clientReceived);
         }

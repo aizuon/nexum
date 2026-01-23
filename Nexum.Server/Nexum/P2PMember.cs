@@ -12,13 +12,13 @@ namespace Nexum.Server
             P2PFirstFrameNumber = (uint)Random.Shared.Next(1, int.MaxValue);
         }
 
-        public Guid ConnectionMagicNumber { get; } = Guid.NewGuid();
+        internal Guid ConnectionMagicNumber { get; } = Guid.NewGuid();
 
         public uint GroupId { get; }
 
         public NetSession Session { get; }
 
-        public uint P2PFirstFrameNumber { get; }
+        internal uint P2PFirstFrameNumber { get; }
 
         internal ConcurrentDictionary<uint, P2PConnectionState> ConnectionStates { get; } =
             new ConcurrentDictionary<uint, P2PConnectionState>();

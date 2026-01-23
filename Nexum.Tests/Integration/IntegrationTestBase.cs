@@ -18,7 +18,9 @@ namespace Nexum.Tests.Integration
 {
     public abstract class IntegrationTestBase : IAsyncLifetime
     {
+        protected const string DefaultServerName = "Relay";
         protected const int DefaultTcpPort = 38000;
+        protected static readonly Guid DefaultServerGuid = new Guid("a43a97d1-9ec7-495e-ad5f-8fe45fde1151");
         protected static readonly uint[] DefaultUdpPorts = { 39000, 39001, 39002, 39003 };
         protected static readonly IPAddress DefaultAddress = IPAddress.Loopback;
 
@@ -112,7 +114,13 @@ namespace Nexum.Tests.Integration
 
             CreatedClients.Clear();
 
-            foreach (var client in NetClient.Clients.Values)
+            List<NetClient> globalClients;
+            lock (NetClient.ClientsLock)
+            {
+                globalClients = new List<NetClient>(NetClient.Clients);
+            }
+
+            foreach (var client in globalClients)
                 try
                 {
                     await DisposeClientAsync(client);
@@ -123,7 +131,10 @@ namespace Nexum.Tests.Integration
                     exceptions.Add(ex);
                 }
 
-            NetClient.Clients.Clear();
+            lock (NetClient.ClientsLock)
+            {
+                NetClient.Clients.Clear();
+            }
 
             if (Server != null)
                 try
@@ -204,23 +215,24 @@ namespace Nexum.Tests.Integration
         }
 
         protected async Task<NetServer> CreateServerAsync(
-            ServerType serverType = ServerType.Relay,
-            bool allowDirectP2P = true,
+            string serverName = DefaultServerName,
+            Guid? serverGuid = null,
             NetSettings netSettings = null,
             bool withUdp = true)
         {
             var endpoint = new IPEndPoint(DefaultAddress, TcpPort);
-            var server = new NetServer(serverType, netSettings, allowDirectP2P);
+            var server = new NetServer(serverName, serverGuid ?? DefaultServerGuid, netSettings);
             await server.ListenAsync(endpoint, withUdp ? UdpPorts : Array.Empty<uint>());
             return server;
         }
 
         protected async Task<NetClient> CreateClientAsync(
-            ServerType serverType = ServerType.Relay,
+            string serverName = DefaultServerName,
+            Guid? serverGuid = null,
             Action<NetClient> configure = null)
         {
             var endpoint = new IPEndPoint(DefaultAddress, TcpPort);
-            var client = new NetClient(serverType);
+            var client = new NetClient(serverName, serverGuid ?? DefaultServerGuid);
 
             if (CurrentNetworkProfile != null)
                 client.NetworkSimulationProfile = CurrentNetworkProfile;
@@ -237,7 +249,7 @@ namespace Nexum.Tests.Integration
             TimeSpan? timeout = null,
             TimeSpan? pollInterval = null)
         {
-            var actualTimeout = timeout ?? MessageTimeout;
+            var actualTimeout = timeout ?? GetAdjustedTimeout(MessageTimeout);
             var actualPollInterval = pollInterval ?? TimeSpan.FromMilliseconds(100);
             var startTime = DateTime.UtcNow;
 
@@ -254,22 +266,25 @@ namespace Nexum.Tests.Integration
 
         protected async Task<bool> WaitForClientConnectionAsync(NetClient client, TimeSpan? timeout = null)
         {
-            return await WaitForConditionAsync(() => client.HostId != 0, timeout ?? ConnectionTimeout);
+            return await WaitForConditionAsync(() => client.HostId != 0,
+                timeout ?? GetAdjustedTimeout(ConnectionTimeout));
         }
 
         protected async Task<bool> WaitForClientUdpEnabledAsync(NetClient client, TimeSpan? timeout = null)
         {
-            return await WaitForConditionAsync(() => client.UdpEnabled, timeout ?? UdpSetupTimeout);
+            return await WaitForConditionAsync(() => client.UdpEnabled, timeout ?? GetAdjustedTimeout(UdpSetupTimeout));
         }
 
         protected async Task<bool> WaitForSessionUdpEnabledAsync(NetSession session, TimeSpan? timeout = null)
         {
-            return await WaitForConditionAsync(() => session.UdpEnabled, timeout ?? UdpSetupTimeout);
+            return await WaitForConditionAsync(() => session.UdpEnabled,
+                timeout ?? GetAdjustedTimeout(UdpSetupTimeout));
         }
 
         protected async Task<bool> WaitForP2PDirectConnectionAsync(ClientP2PMember member, TimeSpan? timeout = null)
         {
-            return await WaitForConditionAsync(() => member.DirectP2PReady, timeout ?? UdpSetupTimeout);
+            return await WaitForConditionAsync(() => member.DirectP2PReady,
+                timeout ?? GetAdjustedTimeout(UdpSetupTimeout));
         }
 
         #region Network Simulation

@@ -1,5 +1,6 @@
 using System;
 using System.Net;
+using System.Threading.Tasks;
 using DotNetty.Transport.Bootstrapping;
 using DotNetty.Transport.Channels;
 using DotNetty.Transport.Channels.Sockets;
@@ -12,44 +13,39 @@ namespace Nexum.Server
 {
     internal sealed class UdpSocket
     {
-        private readonly ILogger _logger;
+        private readonly NetServer _owner;
+        private ILogger _logger = Log.ForContext(Constants.SourceContextPropertyName, nameof(UdpSocket));
 
-        public readonly int Port;
+        internal int Port;
         internal IEventLoopGroup WorkerGroup;
 
-        public UdpSocket(NetServer owner, IPAddress udpAddress, int listenerPort)
+        internal UdpSocket(NetServer owner)
+        {
+            _owner = owner;
+        }
+
+        internal IChannel Channel { get; private set; }
+
+        internal async Task ListenAsync(IPAddress udpAddress, int listenerPort)
         {
             Port = listenerPort;
             _logger = Log.ForContext(Constants.SourceContextPropertyName, $"{nameof(UdpSocket)}({Port})");
-            Channel = Listen(owner, udpAddress, Port);
-            _logger.Debug("UDP socket bound on {Address}:{Port}", udpAddress, Port);
-        }
-
-        public static Action<IChannelPipeline> UdpPipelineConfigurator { get; set; }
-
-        public IChannel Channel { get; private set; }
-
-        private IChannel Listen(NetServer owner, IPAddress udpAddress, int listenerPort)
-        {
             WorkerGroup = new MultithreadEventLoopGroup();
-            return new Bootstrap()
+            Channel = await new Bootstrap()
                 .Group(WorkerGroup)
                 .Channel<SocketDatagramChannel>()
                 .Handler(new ActionChannelInitializer<IChannel>(ch =>
                 {
-                    UdpPipelineConfigurator?.Invoke(ch.Pipeline);
-
                     ch.Pipeline
                         .AddLast(new UdpFrameDecoder(NetConfig.MessageMaxLength))
                         .AddLast(new UdpFrameEncoder())
-                        .AddLast(new UdpHandler(owner, listenerPort));
+                        .AddLast(new UdpHandler(_owner, Port));
                 }))
-                .BindAsync(new IPEndPoint(udpAddress, listenerPort))
-                .GetAwaiter()
-                .GetResult();
+                .BindAsync(new IPEndPoint(udpAddress, Port));
+            _logger.Debug("UDP socket bound on {Address}:{Port}", udpAddress, Port);
         }
 
-        public void Close()
+        internal void Close()
         {
             _logger.Debug("Closing UDP socket on port {Port}", Port);
             Channel?.CloseAsync();

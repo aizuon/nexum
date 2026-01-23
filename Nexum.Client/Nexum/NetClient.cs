@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Net;
@@ -17,6 +18,7 @@ using Nexum.Core.DotNetty.Codecs;
 using Nexum.Core.Simulation;
 using Serilog;
 using Constants = Serilog.Core.Constants;
+using BurstDuplicateLogger = Nexum.Core.Logging.BurstDuplicateLogger;
 
 namespace Nexum.Client
 {
@@ -44,8 +46,9 @@ namespace Nexum.Client
 
         public delegate void OnUdpDisconnectedDelegate();
 
-        internal static readonly ConcurrentDictionary<ServerType, NetClient> Clients =
-            new ConcurrentDictionary<ServerType, NetClient>();
+        internal static readonly List<NetClient> Clients = new List<NetClient>();
+
+        internal static readonly object ClientsLock = new object();
 
         private static readonly Mutex _udpConnectMutex = new Mutex(false, "NexumUdpConnectMutex");
 
@@ -102,7 +105,7 @@ namespace Nexum.Client
         internal ThreadLoop ReliableUdpLoop;
         internal IPEndPoint SelfUdpSocket;
 
-        internal Guid ServerGuid;
+        internal Guid ServerInstanceGuid;
         internal MtuDiscovery ServerMtuDiscovery;
         internal double ServerTimeDiff;
         internal int ServerUdpFallbackCount;
@@ -124,19 +127,21 @@ namespace Nexum.Client
 
         internal ThreadLoop UnreliablePingLoop;
 
-        public NetClient(ServerType serverType)
+        public NetClient(string serverName, Guid serverGuid)
         {
-            ServerType = serverType;
-            Logger = Log.ForContext(Constants.SourceContextPropertyName, $"{ServerType}Client");
+            ServerName = serverName;
+            ServerGuid = serverGuid;
+            Logger = BurstDuplicateLogger.WrapForNexumHolepunching(
+                Log.ForContext(Constants.SourceContextPropertyName, $"{ServerName}Client"));
 
             ServerMtuDiscovery = new MtuDiscovery();
             UdpFragBoard = new UdpPacketFragBoard { MtuDiscovery = ServerMtuDiscovery };
             UdpDefragBoard = new UdpPacketDefragBoard();
 
-            if (ServerType == ServerType.Relay)
-                P2PGroup = new P2PGroup();
-
-            Clients.TryAdd(ServerType, this);
+            lock (ClientsLock)
+            {
+                Clients.Add(this);
+            }
         }
 
         public double Ping => ServerUdpRecentPing;
@@ -149,14 +154,13 @@ namespace Nexum.Client
 
         public static Action<IChannelPipeline> UdpPipelineConfigurator { get; set; }
 
-
         public NetworkProfile NetworkSimulationProfile { get; set; }
 
         internal byte[] PinnedServerPublicKey { get; private set; }
 
         public uint HostId { get; internal set; }
 
-        public P2PGroup P2PGroup { get; internal set; }
+        public P2PGroup P2PGroup { get; internal set; } = new P2PGroup();
 
         public bool UdpEnabled { get; internal set; }
 
@@ -173,7 +177,8 @@ namespace Nexum.Client
 
         internal void UpdateLoggerContext(string context)
         {
-            Logger = Log.ForContext(Constants.SourceContextPropertyName, context);
+            Logger = BurstDuplicateLogger.WrapForNexumHolepunching(
+                Log.ForContext(Constants.SourceContextPropertyName, context));
         }
 
         public event EventHandler<ConnectionStateChangedEventArgs> ConnectionStateChanged;
@@ -260,12 +265,12 @@ namespace Nexum.Client
         {
             if (!graceful)
             {
-                Logger.Debug("Forcing immediate disconnect from {ServerType}", ServerType);
+                Logger.Debug("Forcing immediate disconnect from {ServerName}", ServerName);
                 Dispose();
                 return false;
             }
 
-            Logger.Debug("Initiating graceful TCP shutdown to {ServerType} with timeout {Timeout}s", ServerType,
+            Logger.Debug("Initiating graceful TCP shutdown to {ServerName} with timeout {Timeout}s", ServerName,
                 NetConfig.GracefulDisconnectTimeout);
 
             var tcs = new TaskCompletionSource<bool>();
@@ -344,7 +349,7 @@ namespace Nexum.Client
 
             _isDisposed = true;
 
-            Logger.Debug("Disposing NetClient for {ServerType}", ServerType);
+            Logger.Debug("Disposing NetClient for {ServerName}", ServerName);
 
             SetConnectionState(ConnectionState.Disconnected);
 
@@ -379,7 +384,10 @@ namespace Nexum.Client
             _eventLoopGroup?.ShutdownGracefullyAsync(TimeSpan.Zero, TimeSpan.Zero);
             _eventLoopGroup = null;
 
-            Clients.TryRemove(ServerType, out _);
+            lock (ClientsLock)
+            {
+                Clients.Remove(this);
+            }
 
             Crypt?.Dispose();
             Crypt = null;
@@ -577,7 +585,7 @@ namespace Nexum.Client
 
         internal void CloseUdp()
         {
-            Logger.Debug("Closing UDP channel for {ServerType}", ServerType);
+            Logger.Debug("Closing UDP channel for {ServerName}", ServerName);
             bool wasEnabled = UdpEnabled;
             UdpEnabled = false;
             SelfUdpSocket = null;

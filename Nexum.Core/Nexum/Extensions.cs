@@ -8,7 +8,7 @@ using DotNetty.Buffers;
 
 namespace Nexum.Core
 {
-    internal static class NexumBinaryReaderExtensions
+    public static class NexumBinaryReaderExtensions
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static int ReadScalar(this BinaryReader @this)
@@ -110,7 +110,7 @@ namespace Nexum.Core
         }
     }
 
-    internal static class NexumByteArrayExtensions
+    public static class NexumByteArrayExtensions
     {
         public static byte[] CompressZLib(this byte[] @this)
         {

@@ -12,6 +12,9 @@ namespace Nexum.E2E.Client
 {
     public static class Program
     {
+        private const string ServerName = "Relay";
+        private static readonly Guid ServerGuid = new Guid("a43a97d1-9ec7-495e-ad5f-8fe45fde1151");
+
         private static NetClient _client;
         private static ClientConfig _config;
         private static readonly ManualResetEventSlim ConnectionComplete = new ManualResetEventSlim(false);
@@ -62,7 +65,7 @@ namespace Nexum.E2E.Client
 
         private static async Task<int> RunAllScenariosAsync()
         {
-            _client = new NetClient(ServerType.Relay);
+            _client = new NetClient(ServerName, ServerGuid);
             SetupEventHandlers();
 
             Log.Information("=== Scenario 1: TCP Connection ===");

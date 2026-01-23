@@ -11,6 +11,9 @@ namespace ExampleClient
 {
     public static class Program
     {
+        private const string ServerName = "Relay";
+        private static readonly Guid ServerGuid = new Guid("a43a97d1-9ec7-495e-ad5f-8fe45fde1151");
+
         private static NetClient _client;
 
         public static async Task Main()
@@ -33,7 +36,7 @@ namespace ExampleClient
 #endif
                 .CreateLogger();
 
-            _client = new NetClient(ServerType.Relay);
+            _client = new NetClient(ServerName, ServerGuid);
             _client.OnConnected += () =>
             {
                 var enterServiceReq = new NetMessage();

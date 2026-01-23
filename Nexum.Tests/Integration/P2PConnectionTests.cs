@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -103,6 +104,75 @@ namespace Nexum.Tests.Integration
             Assert.True(peer2.DirectP2PReady, $"[{profileName}] Peer2 should be DirectP2PReady");
 
             LogSimulationStatistics();
+        }
+
+        [Fact(Timeout = 180000)]
+        public async Task P2PConnection_Jit_InitializedOnFirstPeerRmi()
+        {
+            var profile = NetworkProfile.GetByName("Ideal");
+            SetupNetworkSimulation(profile);
+
+            var netSettings = new NetSettings
+            {
+                DirectP2PStartCondition = DirectP2PStartCondition.Jit
+            };
+
+            Server = await CreateServerAsync(netSettings: netSettings);
+
+            var client1 = await CreateClientAsync();
+            await WaitForClientConnectionAsync(client1);
+
+            var client2 = await CreateClientAsync();
+            await WaitForClientConnectionAsync(client2);
+
+            var session1 = Server.Sessions[client1.HostId];
+            var session2 = Server.Sessions[client2.HostId];
+            var group = Server.CreateP2PGroup();
+
+            group.Join(session1);
+            group.Join(session2);
+
+            await WaitForClientUdpEnabledAsync(client1, GetAdjustedTimeout(UdpSetupTimeout));
+            await WaitForClientUdpEnabledAsync(client2, GetAdjustedTimeout(UdpSetupTimeout));
+
+            await WaitForConditionAsync(
+                () => client1.P2PGroup?.P2PMembers.ContainsKey(client2.HostId) == true &&
+                      client2.P2PGroup?.P2PMembers.ContainsKey(client1.HostId) == true,
+                GetAdjustedTimeout(MessageTimeout));
+
+            var peer1 = client1.P2PGroup.P2PMembers[client2.HostId];
+            var peer2 = client2.P2PGroup.P2PMembers[client1.HostId];
+
+            bool becameDirectWithoutRmi = await WaitForConditionAsync(
+                () => peer1.DirectP2P || peer2.DirectP2P,
+                TimeSpan.FromSeconds(2));
+
+            Assert.False(becameDirectWithoutRmi,
+                "Direct P2P should not be auto-initiated when DirectP2PStartCondition is Jit");
+
+            int received = 0;
+            var receivedEvent = new ManualResetEventSlim(false);
+            client2.OnRMIReceive += (msg, rmiId) =>
+            {
+                if (rmiId != 7010)
+                    return;
+                msg.Read(out received);
+                receivedEvent.Set();
+            };
+
+            var testMessage = new NetMessage();
+            testMessage.Write(1234);
+            peer1.RmiToPeer(7010, testMessage, reliable: true);
+
+            Assert.True(receivedEvent.Wait(GetAdjustedTimeout(ConnectionTimeout)),
+                "Peer RMI should be delivered (relayed initially if needed)");
+            Assert.Equal(1234, received);
+
+            await WaitForP2PDirectConnectionAsync(peer1, GetAdjustedTimeout(UdpSetupTimeout));
+            await WaitForP2PDirectConnectionAsync(peer2, GetAdjustedTimeout(UdpSetupTimeout));
+
+            Assert.True(peer1.DirectP2PReady, "Peer1 should become DirectP2PReady after first peer RMI in JIT mode");
+            Assert.True(peer2.DirectP2PReady, "Peer2 should become DirectP2PReady after first peer RMI in JIT mode");
         }
 
         [Theory(Timeout = 180000)]
@@ -235,14 +305,14 @@ namespace Nexum.Tests.Integration
 
             await WaitForConditionAsync(
                 () => client1.P2PGroup?.P2PMembers.ContainsKey(client2.HostId) == true,
-                MessageTimeout);
+                GetAdjustedTimeout(MessageTimeout));
 
             var session2 = Server.Sessions[client2.HostId];
             group.Leave(session2);
 
             await WaitForConditionAsync(
                 () => !client1.P2PGroup.P2PMembers.ContainsKey(client2.HostId),
-                MessageTimeout);
+                GetAdjustedTimeout(MessageTimeout));
 
             Assert.False(client1.P2PGroup.P2PMembers.ContainsKey(client2.HostId));
         }
@@ -254,13 +324,13 @@ namespace Nexum.Tests.Integration
 
             await WaitForConditionAsync(
                 () => client1.P2PGroup?.P2PMembers.ContainsKey(client2.HostId) == true,
-                MessageTimeout);
+                GetAdjustedTimeout(MessageTimeout));
 
             client2.Dispose();
 
             await WaitForConditionAsync(
                 () => !client1.P2PGroup.P2PMembers.ContainsKey(client2.HostId),
-                MessageTimeout);
+                GetAdjustedTimeout(MessageTimeout));
 
             Assert.False(client1.P2PGroup.P2PMembers.ContainsKey(client2.HostId));
             Assert.Single(group.P2PMembers);
@@ -342,6 +412,186 @@ namespace Nexum.Tests.Integration
 
             Output.WriteLine($"P2P encrypted communication successful. " +
                              $"Peer1 DirectP2P: {peer1.DirectP2P}, Peer2 DirectP2P: {peer2.DirectP2P}");
+        }
+
+        [Fact(Timeout = 180000)]
+        public async Task P2PUdpSocketRecycling_ReusesLocalPortAfterPeerLeavesAndRejoins()
+        {
+            var profile = NetworkProfile.GetByName("Ideal");
+            SetupNetworkSimulation(profile);
+
+            Server = await CreateServerAsync(withUdp: true);
+
+            var client1 = await CreateClientAsync();
+            Assert.True(await WaitForClientConnectionAsync(client1), "Client1 should connect");
+
+            var client2 = await CreateClientAsync();
+            Assert.True(await WaitForClientConnectionAsync(client2), "Client2 should connect");
+
+            var session1 = Server.Sessions[client1.HostId];
+            var session2 = Server.Sessions[client2.HostId];
+
+            var group = Server.CreateP2PGroup();
+            group.Join(session1);
+            group.Join(session2);
+
+            Assert.True(await WaitForClientUdpEnabledAsync(client1, GetAdjustedTimeout(UdpSetupTimeout)),
+                "Client1 UDP should be enabled");
+            Assert.True(await WaitForClientUdpEnabledAsync(client2, GetAdjustedTimeout(UdpSetupTimeout)),
+                "Client2 UDP should be enabled");
+
+            Assert.True(await WaitForConditionAsync(
+                    () => client1.P2PGroup?.P2PMembers.ContainsKey(client2.HostId) == true &&
+                          client2.P2PGroup?.P2PMembers.ContainsKey(client1.HostId) == true,
+                    GetAdjustedTimeout(MessageTimeout)),
+                "Both clients should see each other as P2P members");
+
+            var peer1 = client1.P2PGroup.P2PMembers[client2.HostId];
+            var peer2 = client2.P2PGroup.P2PMembers[client1.HostId];
+
+            Assert.True(await WaitForP2PDirectConnectionAsync(peer1, GetAdjustedTimeout(UdpSetupTimeout)),
+                "Peer1 should establish direct P2P");
+            Assert.True(await WaitForP2PDirectConnectionAsync(peer2, GetAdjustedTimeout(UdpSetupTimeout)),
+                "Peer2 should establish direct P2P");
+
+            Assert.True(peer1.DirectP2PReady, "Peer1 should be DirectP2PReady");
+            Assert.True(peer2.DirectP2PReady, "Peer2 should be DirectP2PReady");
+
+            int originalPort = peer1.SelfUdpLocalSocket?.Port ?? 0;
+            Assert.True(originalPort > 0, "Peer1 should have a valid P2P local UDP port");
+
+            group.Leave(session2);
+
+            Assert.True(await WaitForConditionAsync(
+                    () => client1.P2PGroup?.P2PMembers.ContainsKey(client2.HostId) == false,
+                    GetAdjustedTimeout(MessageTimeout)),
+                "Client1 should remove client2 from P2P members after leave");
+
+            ushort originalPortKey = (ushort)originalPort;
+
+            Assert.True(await WaitForConditionAsync(
+                    () => client1.RecycledSockets.ContainsKey(originalPortKey),
+                    GetAdjustedTimeout(MessageTimeout)),
+                $"Client1 should recycle its P2P UDP socket on port {originalPort}");
+
+            Assert.True(client1.RecycledSockets.TryGetValue(originalPortKey, out var recycled),
+                "Recycled socket should be present");
+            Assert.NotNull(recycled);
+            Assert.NotNull(recycled.Channel);
+            Assert.True(recycled.Channel.Active, "Recycled UDP channel should remain active");
+
+            group.Join(session2);
+
+            Assert.True(await WaitForConditionAsync(
+                    () => client1.P2PGroup?.P2PMembers.ContainsKey(client2.HostId) == true &&
+                          client2.P2PGroup?.P2PMembers.ContainsKey(client1.HostId) == true,
+                    GetAdjustedTimeout(MessageTimeout)),
+                "After re-join, both clients should see each other as P2P members");
+
+            var peer1B = client1.P2PGroup.P2PMembers[client2.HostId];
+            var peer2B = client2.P2PGroup.P2PMembers[client1.HostId];
+
+            Assert.True(await WaitForP2PDirectConnectionAsync(peer1B, GetAdjustedTimeout(UdpSetupTimeout)),
+                "Peer1 should re-establish direct P2P after re-join");
+            Assert.True(await WaitForP2PDirectConnectionAsync(peer2B, GetAdjustedTimeout(UdpSetupTimeout)),
+                "Peer2 should re-establish direct P2P after re-join");
+
+            Assert.True(peer1B.DirectP2PReady, "Peer1 should be DirectP2PReady after re-join");
+            Assert.True(peer1B.LocalPortReuseSuccess,
+                "Peer1 should report successful local UDP port reuse for P2P after recycle");
+            Assert.Equal(originalPort, peer1B.SelfUdpLocalSocket?.Port ?? 0);
+
+            Assert.False(client1.RecycledSockets.ContainsKey(originalPortKey),
+                "Recycled socket entry should be consumed when the port is reused");
+        }
+
+        [Fact(Timeout = 180000)]
+        public async Task P2PRecycleComplete_RecycledTrue_RestoresDirectP2PWithoutHolepunch()
+        {
+            var profile = NetworkProfile.GetByName("Ideal");
+            SetupNetworkSimulation(profile);
+
+            Server = await CreateServerAsync(withUdp: true);
+
+            var client1 = await CreateClientAsync();
+            Assert.True(await WaitForClientConnectionAsync(client1), "Client1 should connect");
+
+            var client2 = await CreateClientAsync();
+            Assert.True(await WaitForClientConnectionAsync(client2), "Client2 should connect");
+
+            var session1 = Server.Sessions[client1.HostId];
+            var session2 = Server.Sessions[client2.HostId];
+
+            var group = Server.CreateP2PGroup();
+            group.Join(session1);
+            group.Join(session2);
+
+            Assert.True(await WaitForClientUdpEnabledAsync(client1, GetAdjustedTimeout(UdpSetupTimeout)),
+                "Client1 UDP should be enabled");
+            Assert.True(await WaitForClientUdpEnabledAsync(client2, GetAdjustedTimeout(UdpSetupTimeout)),
+                "Client2 UDP should be enabled");
+
+            Assert.True(await WaitForConditionAsync(
+                    () => client1.P2PGroup?.P2PMembers.ContainsKey(client2.HostId) == true &&
+                          client2.P2PGroup?.P2PMembers.ContainsKey(client1.HostId) == true,
+                    GetAdjustedTimeout(MessageTimeout)),
+                "Both clients should see each other as P2P members");
+
+            var peer1 = client1.P2PGroup.P2PMembers[client2.HostId];
+            var peer2 = client2.P2PGroup.P2PMembers[client1.HostId];
+
+            Assert.True(await WaitForP2PDirectConnectionAsync(peer1, GetAdjustedTimeout(UdpSetupTimeout)),
+                "Peer1 should establish direct P2P");
+            Assert.True(await WaitForP2PDirectConnectionAsync(peer2, GetAdjustedTimeout(UdpSetupTimeout)),
+                "Peer2 should establish direct P2P");
+
+            var previousPeer1SendAddr = peer1.PeerLocalToRemoteSocket;
+            var previousPeer1RecvAddr = peer1.PeerRemoteToLocalSocket;
+            Assert.NotNull(previousPeer1SendAddr);
+            Assert.NotNull(previousPeer1RecvAddr);
+
+            int peer1Port = peer1.SelfUdpLocalSocket?.Port ?? 0;
+            int peer2Port = peer2.SelfUdpLocalSocket?.Port ?? 0;
+            Assert.True(peer1Port > 0, "Peer1 should have a valid P2P local UDP port");
+            Assert.True(peer2Port > 0, "Peer2 should have a valid P2P local UDP port");
+
+            group.Leave(session2);
+
+            Assert.True(await WaitForConditionAsync(
+                    () => client1.P2PGroup?.P2PMembers.ContainsKey(client2.HostId) == false,
+                    GetAdjustedTimeout(MessageTimeout)),
+                "Client1 should remove client2 from P2P members after leave");
+
+            Assert.True(await WaitForConditionAsync(
+                    () => client1.RecycledSockets.ContainsKey((ushort)peer1Port) &&
+                          client2.RecycledSockets.ContainsKey((ushort)peer2Port),
+                    GetAdjustedTimeout(MessageTimeout)),
+                "Both clients should recycle their P2P UDP sockets after leave");
+
+            group.Join(session2);
+
+            Assert.True(await WaitForConditionAsync(
+                    () => client1.P2PGroup?.P2PMembers.ContainsKey(client2.HostId) == true &&
+                          client2.P2PGroup?.P2PMembers.ContainsKey(client1.HostId) == true,
+                    GetAdjustedTimeout(MessageTimeout)),
+                "After re-join, both clients should see each other as P2P members");
+
+            var peer1B = client1.P2PGroup.P2PMembers[client2.HostId];
+            var peer2B = client2.P2PGroup.P2PMembers[client1.HostId];
+
+            Assert.True(await WaitForConditionAsync(
+                    () => peer1B.DirectP2PReady && peer2B.DirectP2PReady,
+                    TimeSpan.FromSeconds(2)),
+                "Direct P2P should be restored quickly via recycle without a new holepunch");
+
+            Assert.False(peer1B.P2PHolepunchInitiated, "Recycled=true should not start a new holepunch (peer1)");
+            Assert.False(peer2B.P2PHolepunchInitiated, "Recycled=true should not start a new holepunch (peer2)");
+
+            Assert.Equal(previousPeer1SendAddr, peer1B.PeerLocalToRemoteSocket);
+            Assert.Equal(previousPeer1RecvAddr, peer1B.PeerRemoteToLocalSocket);
+
+            Assert.True(peer1B.LocalPortReuseSuccess, "Peer1 should reuse its local P2P UDP port");
+            Assert.True(peer2B.LocalPortReuseSuccess, "Peer2 should reuse its local P2P UDP port");
         }
     }
 }

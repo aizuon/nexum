@@ -68,9 +68,10 @@ namespace Nexum.Tests.Integration
             client.Dispose();
 
             await WaitForConditionAsync(() => client.ConnectionState == ConnectionState.Disconnected,
-                ConnectionTimeout);
+                GetAdjustedTimeout(ConnectionTimeout));
             Assert.Equal(ConnectionState.Disconnected, client.ConnectionState);
-            Assert.True(disconnectedCalled.Wait(ConnectionTimeout), "OnSessionDisconnected should be called");
+            Assert.True(disconnectedCalled.Wait(GetAdjustedTimeout(ConnectionTimeout)),
+                "OnSessionDisconnected should be called");
         }
     }
 }

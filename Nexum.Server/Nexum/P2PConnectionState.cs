@@ -31,6 +31,7 @@ namespace Nexum.Server
 
         internal bool IsInitialized { get; set; }
         internal bool IsJoined { get; set; }
+        internal bool LocalPortReuseSuccess { get; set; }
         internal bool JitTriggered { get; set; }
         internal bool PeerUdpHolepunchSuccess { get; set; }
         internal bool HolepunchSuccess { get; set; }

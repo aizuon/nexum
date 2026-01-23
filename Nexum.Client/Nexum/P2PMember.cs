@@ -25,6 +25,8 @@ namespace Nexum.Client
 
         internal bool IsClosed;
 
+        internal bool JitDirectP2PTriggerSent;
+
         internal double JitterInternal;
         internal double LastPeerServerPing;
         internal double LastPingInternal;
@@ -73,7 +75,7 @@ namespace Nexum.Client
             GroupId = groupId;
             HostId = hostId;
             Logger = Log.ForContext("HostId", HostId).ForContext(Constants.SourceContextPropertyName,
-                $"{owner.ServerType}{nameof(P2PMember)}({HostId})");
+                $"{owner.ServerName}{nameof(P2PMember)}({HostId})");
 
             UdpDefragBoard.LocalHostId = owner.HostId;
             UdpFragBoard.MtuDiscovery = MtuDiscovery;
@@ -103,6 +105,8 @@ namespace Nexum.Client
         public void RmiToPeer(ushort rmiId, NetMessage message, EncryptMode ecMode = EncryptMode.Fast,
             bool forceRelay = false, bool reliable = false)
         {
+            TryTriggerJitDirectP2PIfNeeded(forceRelay);
+
             var data = new NetMessage();
             data.Reliable = reliable;
             if (ecMode != EncryptMode.None)
@@ -175,6 +179,47 @@ namespace Nexum.Client
 
                 Owner.NexumToServerUdpIfAvailable(unreliableRelay);
             }
+        }
+
+        private void TryTriggerJitDirectP2PIfNeeded(bool forceRelay)
+        {
+            if (forceRelay)
+                return;
+
+            if (!EnableDirectP2P)
+                return;
+
+            if (DirectP2P)
+                return;
+
+            if (Owner.NetSettings.DirectP2PStartCondition != DirectP2PStartCondition.Jit)
+                return;
+
+            uint hostId = HostId;
+
+            lock (P2PMutex)
+            {
+                if (IsClosed || DirectP2P)
+                    return;
+
+                if (JitDirectP2PTriggerSent)
+                    return;
+
+                if (PeerUdpChannel == null && SelfUdpLocalSocket != null)
+                {
+                    int? targetPort = SelfUdpLocalSocket.Port;
+                    (var channel, var workerGroup, int port, _) = Owner.ConnectUdp(targetPort);
+                    PeerUdpChannel = channel;
+                    PeerUdpEventLoopGroup = workerGroup;
+                    SelfUdpLocalSocket = new IPEndPoint(Owner.LocalIP, port);
+                }
+
+                JitDirectP2PTriggerSent = true;
+            }
+
+            var notifyJitDirectP2PTriggered = new NetMessage();
+            notifyJitDirectP2PTriggered.Write(hostId);
+            Owner.RmiToServer((ushort)NexumOpCode.NotifyJitDirectP2PTriggered, notifyJitDirectP2PTriggered);
         }
 
         internal void InitializeReliableUdp(uint senderFirstFrameNumber, uint receiverExpectedFrameNumber)
@@ -294,6 +339,7 @@ namespace Nexum.Client
             P2PHolepunchInitiated = false;
             P2PHolepunchNotified = false;
             P2PHolepunchStarted = false;
+            JitDirectP2PTriggerSent = false;
             LastUdpReceivedTime = 0;
 
             if (ToPeerReliableUdp != null)

@@ -22,7 +22,7 @@ namespace Nexum.Core
 
         private int _successCount;
 
-        public int ConfirmedMtu
+        internal int ConfirmedMtu
         {
             get
             {
@@ -33,7 +33,7 @@ namespace Nexum.Core
             }
         }
 
-        public bool IsDiscoveryComplete
+        internal bool IsDiscoveryComplete
         {
             get
             {

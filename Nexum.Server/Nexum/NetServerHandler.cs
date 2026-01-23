@@ -185,15 +185,28 @@ namespace Nexum.Server
             session.Logger.Debug("NotifyServerConnectionRequestData");
 
             var connectionRequestPayload = new ByteArray();
-            if (!message.Read(ref connectionRequestPayload) || !message.Read(out Guid version) ||
-                !message.Read(out uint netVersion))
+            if (!message.Read(ref connectionRequestPayload) || !message.Read(out Guid protocolVersion) ||
+                !message.Read(out uint internalVersion))
                 return;
 
-            if (netVersion != Constants.NetVersion)
+            if (internalVersion != Constants.NetVersion)
             {
                 session.Logger.Warning(
-                    "Protocol version mismatch => client={ClientVersion}, server={ServerVersion}",
-                    netVersion, Constants.NetVersion);
+                    "Internal version mismatch => client={ClientVersion}, server={ServerVersion}",
+                    internalVersion, Constants.NetVersion);
+
+                var notifyServerDeniedConnection = new NetMessage();
+                notifyServerDeniedConnection.WriteEnum(MessageType.NotifyServerDeniedConnection);
+
+                session.NexumToClient(notifyServerDeniedConnection);
+                return;
+            }
+
+            if (protocolVersion != server.ServerGuid)
+            {
+                session.Logger.Warning(
+                    "Protocol version mismatch => client={ClientProtocolVersion}, server={ServerProtocolVersion}",
+                    protocolVersion, server.ServerGuid);
 
                 var notifyProtocolVersionMismatch = new NetMessage();
                 notifyProtocolVersionMismatch.WriteEnum(MessageType.NotifyProtocolVersionMismatch);
@@ -205,7 +218,7 @@ namespace Nexum.Server
             var notifyServerConnectSuccess = new NetMessage();
             notifyServerConnectSuccess.WriteEnum(MessageType.NotifyServerConnectSuccess);
             notifyServerConnectSuccess.Write(session.HostId);
-            notifyServerConnectSuccess.Write(server.ServerGuid);
+            notifyServerConnectSuccess.Write(server.ServerInstanceGuid);
             notifyServerConnectSuccess.Write(new ByteArray());
             notifyServerConnectSuccess.Write(session.RemoteEndPoint);
 
@@ -710,6 +723,7 @@ namespace Nexum.Server
                         stateA.RemotePeer.ConnectionStates.ContainsKey(session.HostId))
                     {
                         stateA.IsJoined = true;
+                        stateA.LocalPortReuseSuccess = localPortReuseSuccess;
                         server.InitiateP2PConnections(session);
                         server.InitiateP2PConnections(stateA.RemotePeer.Session);
                     }
@@ -719,17 +733,17 @@ namespace Nexum.Server
 
                 case NexumOpCode.NotifyP2PHolepunchSuccess:
                 {
-                    var endpointA = new IPEndPoint(IPAddress.Loopback, IPEndPoint.MinPort);
-                    var endpointB = new IPEndPoint(IPAddress.Loopback, IPEndPoint.MinPort);
-                    var endpointC = new IPEndPoint(IPAddress.Loopback, IPEndPoint.MinPort);
-                    var endpointD = new IPEndPoint(IPAddress.Loopback, IPEndPoint.MinPort);
+                    var aSendAddrToB = new IPEndPoint(IPAddress.Loopback, IPEndPoint.MinPort);
+                    var bRecvAddrFromA = new IPEndPoint(IPAddress.Loopback, IPEndPoint.MinPort);
+                    var bSendAddrToA = new IPEndPoint(IPAddress.Loopback, IPEndPoint.MinPort);
+                    var aRecvAddrFromB = new IPEndPoint(IPAddress.Loopback, IPEndPoint.MinPort);
 
                     if (!message.Read(out uint hostIdA) ||
                         !message.Read(out uint hostIdB) ||
-                        !message.ReadIPEndPoint(ref endpointA) ||
-                        !message.ReadIPEndPoint(ref endpointB) ||
-                        !message.ReadIPEndPoint(ref endpointC) ||
-                        !message.ReadIPEndPoint(ref endpointD))
+                        !message.ReadIPEndPoint(ref aSendAddrToB) ||
+                        !message.ReadIPEndPoint(ref bRecvAddrFromA) ||
+                        !message.ReadIPEndPoint(ref bSendAddrToA) ||
+                        !message.ReadIPEndPoint(ref aRecvAddrFromB))
                         return;
 
                     var group = session.P2PGroup;
@@ -759,8 +773,8 @@ namespace Nexum.Server
                     }
 
                     session.Logger.Debug(
-                        "NotifyP2PHolepunchSuccess => hostIdA = {HostIdA}, hostIdB = {HostIdB}, endpointA = {EndpointA}, endpointB = {EndpointB}, endpointC = {EndpointC}, endpointD = {EndpointD}",
-                        hostIdA, hostIdB, endpointA, endpointB, endpointC, endpointD);
+                        "NotifyP2PHolepunchSuccess => hostIdA = {HostIdA}, hostIdB = {HostIdB}, aSendAddrToB = {ASendAddrToB}, aRecvAddrFromB = {ARecvAddrFromB}, bSendAddrToA = {BSendAddrToA}, bRecvAddrFromA = {BRecvAddrFromA}",
+                        hostIdA, hostIdB, aSendAddrToB, aRecvAddrFromB, bSendAddrToA, bRecvAddrFromA);
 
                     bool shouldSendEstablish = HolepunchHelper.WithOrderedLocks(
                         hostIdA, hostIdB, stateA.StateLock, stateB.StateLock, () =>
@@ -789,13 +803,19 @@ namespace Nexum.Server
 
                     if (shouldSendEstablish)
                     {
+                        var recycleTimestamp = DateTimeOffset.UtcNow;
+                        peerA.Session.LastSuccessfulP2PRecycleInfos[hostIdB] =
+                            new P2PRecycleInfo(aSendAddrToB, aRecvAddrFromB, recycleTimestamp);
+                        peerB.Session.LastSuccessfulP2PRecycleInfos[hostIdA] =
+                            new P2PRecycleInfo(bSendAddrToA, bRecvAddrFromA, recycleTimestamp);
+
                         var notifyEstablished = new NetMessage();
                         notifyEstablished.Write(hostIdA);
                         notifyEstablished.Write(hostIdB);
-                        notifyEstablished.Write(endpointA);
-                        notifyEstablished.Write(endpointB);
-                        notifyEstablished.Write(endpointC);
-                        notifyEstablished.Write(endpointD);
+                        notifyEstablished.Write(aSendAddrToB);
+                        notifyEstablished.Write(bRecvAddrFromA);
+                        notifyEstablished.Write(bSendAddrToA);
+                        notifyEstablished.Write(aRecvAddrFromB);
 
                         peerA.Session.RmiToClient((ushort)NexumOpCode.NotifyDirectP2PEstablish, notifyEstablished);
                         peerB.Session.RmiToClient((ushort)NexumOpCode.NotifyDirectP2PEstablish, notifyEstablished);
@@ -829,6 +849,8 @@ namespace Nexum.Server
 
                     session.Logger.Debug("NotifyJitDirectP2PTriggered => targetHostId = {TargetHostId}",
                         targetHostId);
+
+                    server.EnsureP2PConnectionInitialized(session, stateA, stateB);
 
                     bool shouldSendNewConnection = HolepunchHelper.WithOrderedLocks(
                         session.HostId, targetHostId, stateA.StateLock, stateB.StateLock, () =>

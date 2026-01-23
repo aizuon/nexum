@@ -6,18 +6,18 @@ namespace Nexum.Core
 {
     internal struct FragHeader
     {
-        public ushort SplitterFlag;
+        internal ushort SplitterFlag;
 
-        public ushort FilterTag;
+        internal ushort FilterTag;
 
-        public uint PacketLength;
+        internal uint PacketLength;
 
-        public uint PacketId;
+        internal uint PacketId;
 
-        public uint FragmentId;
+        internal uint FragmentId;
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public readonly void WriteTo(ByteArray byteArray)
+        internal readonly void WriteTo(ByteArray byteArray)
         {
             byteArray.Write(SplitterFlag);
             byteArray.Write(FilterTag);
@@ -27,7 +27,7 @@ namespace Nexum.Core
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static bool TryReadFrom(ByteArray byteArray, out FragHeader header)
+        internal static bool TryReadFrom(ByteArray byteArray, out FragHeader header)
         {
             header = default(FragHeader);
 
@@ -49,7 +49,7 @@ namespace Nexum.Core
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public readonly void WriteTo(byte[] buffer, int offset)
+        internal readonly void WriteTo(byte[] buffer, int offset)
         {
             BinaryPrimitives.WriteUInt16LittleEndian(buffer.AsSpan(offset), SplitterFlag);
             BinaryPrimitives.WriteUInt16LittleEndian(buffer.AsSpan(offset + 2), FilterTag);
@@ -59,7 +59,7 @@ namespace Nexum.Core
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static bool TryReadFrom(byte[] buffer, int offset, int length, out FragHeader header)
+        internal static bool TryReadFrom(byte[] buffer, int offset, int length, out FragHeader header)
         {
             header = default(FragHeader);
 

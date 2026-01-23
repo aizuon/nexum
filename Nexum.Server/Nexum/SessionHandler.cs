@@ -12,14 +12,14 @@ namespace Nexum.Server
 {
     internal sealed class SessionHandler : ChannelHandlerAdapter
     {
-        public readonly ILogger Logger;
+        internal readonly ILogger Logger;
 
         internal readonly NetServer Owner;
 
-        public SessionHandler(NetServer owner)
+        internal SessionHandler(NetServer owner)
         {
             Owner = owner;
-            Logger = Log.ForContext(Constants.SourceContextPropertyName, $"{owner.ServerType}{nameof(SessionHandler)}");
+            Logger = Log.ForContext(Constants.SourceContextPropertyName, $"{owner.ServerName}{nameof(SessionHandler)}");
         }
 
         public override void ChannelActive(IChannelHandlerContext context)

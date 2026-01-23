@@ -78,6 +78,9 @@ Nexum/
 │   │   ├── NexumFrameEncoder.cs
 │   │   ├── UdpFrameDecoder.cs
 │   │   └── UdpFrameEncoder.cs
+│   ├── Logging/
+│   │   ├── BurstDuplicateLogFilter.cs
+│   │   └── BurstDuplicateLogger.cs
 │   ├── Nexum/
 │   │   ├── AssembledPacket.cs
 │   │   ├── AssembledPacketError.cs
@@ -207,8 +210,11 @@ using System.Net;
 using Nexum.Core;
 using Nexum.Server;
 
+const string serverName = "Relay";
+var serverGuid = new Guid("a43a97d1-9ec7-495e-ad5f-8fe45fde1151");
+
 // Create a server instance
-var server = new NetServer(ServerType.Relay);
+var server = new NetServer(serverName, serverGuid);
 
 // Handle incoming RMI messages
 server.OnRMIReceive += (session, message, rmiId) =>
@@ -241,8 +247,11 @@ using System.Net;
 using Nexum.Core;
 using Nexum.Client;
 
+const string serverName = "Relay";
+var serverGuid = new Guid("a43a97d1-9ec7-495e-ad5f-8fe45fde1151");
+
 // Create a client instance
-var client = new NetClient(ServerType.Relay);
+var client = new NetClient(serverName, serverGuid);
 
 // Handle connection completion
 client.OnConnectionComplete += () =>
@@ -275,6 +284,10 @@ Configure the server behavior using `NetSettings`:
 ```csharp
 var settings = new NetSettings
 {
+    // Transport settings
+    EnableNagleAlgorithm = true,          // TCP Nagle algorithm
+    IdleTimeout = 900,                    // Session idle timeout (seconds)
+
     // Message settings
     MessageMaxLength = 1048576,           // Max message size (1MB)
     
@@ -283,10 +296,11 @@ var settings = new NetSettings
     FastEncryptedMessageKeyLength = 512,  // RC4 key length (bits)
     
     // P2P settings
-    DirectP2PStartCondition = DirectP2PStartCondition.Always,
+    EnableP2PEncryptedMessaging = false,  // Encryption for P2P messages
+    DirectP2PStartCondition = DirectP2PStartCondition.Always, // When to initiate direct P2P holepunching
 };
 
-var server = new NetServer(ServerType.Relay, settings, allowDirectP2P: true);
+var server = new NetServer("Relay", new Guid("a43a97d1-9ec7-495e-ad5f-8fe45fde1151"), settings);
 ```
 
 ## 📡 P2P Communication
@@ -418,19 +432,14 @@ dotnet test Nexum.Tests/Nexum.Tests.csproj --collect:"XPlat Code Coverage"
 | BouncyCastle.Cryptography | 2.6.2   | AES/RC4 encryption         |
 | Serilog                   | 4.3.0   | Structured logging         |
 
-## 📝 Server Types
+## 🆔 Server Identity (ServerName + ServerGuid)
 
-Nexum supports multiple server type configurations:
+Clients and servers identify the target server using:
 
-```csharp
-public enum ServerType : byte
-{
-    Auth,   // Authentication server
-    Game,   // Game server
-    Chat,   // Chat server
-    Relay   // Relay/P2P coordination server
-}
-```
+- `ServerName` (string): used for logging/context
+- `ServerGuid` (Guid): used to validate the handshake target
+
+The client sends `ServerGuid` during the connection handshake, and the server validates it before accepting the connection.
 
 ## 📋 TODO / Work In Progress
 
@@ -445,14 +454,15 @@ The following features are planned or partially implemented:
 
 ### Configurable Settings
 
-| Setting                                     | Type     | Default | Description                     |
-| ------------------------------------------- | -------- | ------- | ------------------------------- |
-| `NetSettings.EnableNagleAlgorithm`          | `bool`   | `true`  | TCP Nagle algorithm             |
-| `NetSettings.EnableP2PEncryptedMessaging`   | `bool`   | `false` | Encryption for P2P messages     |
-| `NetSettings.IdleTimeout`                   | `double` | 900     | Session idle timeout in seconds |
-| `NetSettings.MessageMaxLength`              | `uint`   | 1048576 | Maximum message size            |
-| `NetSettings.EncryptedMessageKeyLength`     | `uint`   | 256     | AES key length in bits          |
-| `NetSettings.FastEncryptedMessageKeyLength` | `uint`   | 512     | RC4 key length in bits          |
+| Setting                                     | Type                      | Default  | Description                              |
+| ------------------------------------------- | ------------------------- | -------- | ---------------------------------------- |
+| `NetSettings.EnableNagleAlgorithm`          | `bool`                    | `true`   | TCP Nagle algorithm                      |
+| `NetSettings.IdleTimeout`                   | `double`                  | 900      | Session idle timeout in seconds          |
+| `NetSettings.MessageMaxLength`              | `uint`                    | 1048576  | Maximum message size                     |
+| `NetSettings.EncryptedMessageKeyLength`     | `uint`                    | 256      | AES key length in bits                   |
+| `NetSettings.FastEncryptedMessageKeyLength` | `uint`                    | 512      | RC4 key length in bits                   |
+| `NetSettings.EnableP2PEncryptedMessaging`   | `bool`                    | `false`  | Encryption for P2P messages              |
+| `NetSettings.DirectP2PStartCondition`       | `DirectP2PStartCondition` | `Always` | When to initiate direct P2P holepunching |
 
 ## 🤝 Contributing
 

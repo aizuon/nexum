@@ -10,14 +10,14 @@ namespace Nexum.Core
     {
         private uint _currentPacketId;
 
-        public UdpPacketFragBoard()
+        internal UdpPacketFragBoard()
         {
             _currentPacketId = (uint)Random.Shared.Next();
         }
 
-        public MtuDiscovery MtuDiscovery { get; set; }
+        internal MtuDiscovery MtuDiscovery { get; set; }
 
-        public UdpPacketDefragBoard DefragBoard { get; set; }
+        internal UdpPacketDefragBoard DefragBoard { get; set; }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private int GetEffectiveMtu()
@@ -32,14 +32,14 @@ namespace Nexum.Core
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public IEnumerable<UdpMessage> FragmentPacket(byte[] payload, uint srcHostId,
+        internal IEnumerable<UdpMessage> FragmentPacket(byte[] payload, uint srcHostId,
             uint destHostId)
         {
             ushort filterTag = FilterTag.Create(srcHostId, destHostId);
             return FragmentPacket(payload, filterTag);
         }
 
-        public IEnumerable<UdpMessage> FragmentPacket(byte[] payload, ushort filterTag)
+        internal IEnumerable<UdpMessage> FragmentPacket(byte[] payload, ushort filterTag)
         {
             if (payload.Length <= 0)
                 yield break;
@@ -84,13 +84,13 @@ namespace Nexum.Core
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static int GetFragmentCount(int payloadLength)
+        internal static int GetFragmentCount(int payloadLength)
         {
             return GetFragmentCount(payloadLength, FragmentConfig.MtuLength);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static int GetFragmentCount(int payloadLength, int mtuLength)
+        internal static int GetFragmentCount(int payloadLength, int mtuLength)
         {
             if (payloadLength <= 0)
                 return 0;
@@ -102,13 +102,13 @@ namespace Nexum.Core
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static bool RequiresFragmentation(int payloadLength)
+        internal static bool RequiresFragmentation(int payloadLength)
         {
             return payloadLength > FragmentConfig.MtuLength;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static bool RequiresFragmentation(int payloadLength, int mtuLength)
+        internal static bool RequiresFragmentation(int payloadLength, int mtuLength)
         {
             return payloadLength > mtuLength;
         }

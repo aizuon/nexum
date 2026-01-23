@@ -95,7 +95,8 @@ namespace Nexum.Tests.Integration
             fastMessage.Write(222);
             client.RmiToServer(5002, fastMessage, EncryptMode.Fast);
 
-            Assert.True(allReceived.Wait(MessageTimeout), "All encrypted messages should be received");
+            Assert.True(allReceived.Wait(GetAdjustedTimeout(MessageTimeout)),
+                "All encrypted messages should be received");
             Assert.Equal(111, secureReceived);
             Assert.Equal(222, fastReceived);
         }

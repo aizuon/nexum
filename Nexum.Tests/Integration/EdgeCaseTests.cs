@@ -3,7 +3,6 @@ using System.Linq;
 using System.Net;
 using System.Threading.Tasks;
 using Nexum.Client;
-using Nexum.Core;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -27,7 +26,7 @@ namespace Nexum.Tests.Integration
 
             client.Dispose();
 
-            await WaitForConditionAsync(() => Server.Sessions.Count == 0, LongOperationTimeout);
+            await WaitForConditionAsync(() => Server.Sessions.Count == 0, GetAdjustedTimeout(LongOperationTimeout));
             Assert.Empty(Server.Sessions);
         }
 
@@ -56,7 +55,7 @@ namespace Nexum.Tests.Integration
         [Fact(Timeout = 60000)]
         public async Task Client_ConnectToNonexistentServer_Fails()
         {
-            var client = new NetClient(ServerType.Relay);
+            var client = new NetClient(DefaultServerName, DefaultServerGuid);
             try
             {
                 await client.ConnectAsync(new IPEndPoint(IPAddress.Loopback, 59999));
@@ -122,7 +121,7 @@ namespace Nexum.Tests.Integration
                 client.Dispose();
                 CreatedClients.Remove(client);
 
-                await WaitForConditionAsync(() => Server.Sessions.Count == 0, ConnectionTimeout);
+                await WaitForConditionAsync(() => Server.Sessions.Count == 0, GetAdjustedTimeout(ConnectionTimeout));
             }
 
             Assert.Empty(Server.Sessions);

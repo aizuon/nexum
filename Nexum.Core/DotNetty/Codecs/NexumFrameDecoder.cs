@@ -10,7 +10,7 @@ namespace Nexum.Core.DotNetty.Codecs
         internal static readonly ILogger Logger =
             Log.ForContext(Serilog.Core.Constants.SourceContextPropertyName, nameof(NexumFrameDecoder));
 
-        public NexumFrameDecoder(int maxFrameLength)
+        internal NexumFrameDecoder(int maxFrameLength)
             : base(ByteOrder.LittleEndian, maxFrameLength, 2, 1, 0, 0, true)
         {
         }

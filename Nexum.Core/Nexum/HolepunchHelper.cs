@@ -60,13 +60,13 @@ namespace Nexum.Core
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal static NetMessage CreatePeerUdpPeerHolepunchMessage(uint hostId, Guid peerMagicNumber,
-            Guid serverGuid, IPEndPoint targetEndpoint)
+            Guid serverInstanceGuid, IPEndPoint targetEndpoint)
         {
             var msg = new NetMessage();
             msg.WriteEnum(MessageType.PeerUdp_PeerHolepunch);
             msg.Write(hostId);
             msg.Write(peerMagicNumber);
-            msg.Write(serverGuid);
+            msg.Write(serverInstanceGuid);
             msg.Write(targetEndpoint);
             return msg;
         }

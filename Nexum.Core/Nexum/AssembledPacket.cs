@@ -4,10 +4,10 @@ namespace Nexum.Core
 {
     internal sealed class AssembledPacket
     {
-        public DefraggingPacket Packet { get; set; }
+        internal DefraggingPacket Packet { get; set; }
 
-        public IPEndPoint SenderEndPoint { get; set; }
+        internal IPEndPoint SenderEndPoint { get; set; }
 
-        public uint SrcHostId { get; set; }
+        internal uint SrcHostId { get; set; }
     }
 }

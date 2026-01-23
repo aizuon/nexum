@@ -18,13 +18,13 @@ namespace Nexum.Core
 
         private int _inferredMtu = FragmentConfig.MtuLength;
 
-        public uint LocalHostId { get; set; } = (uint)HostId.None;
+        internal uint LocalHostId { get; set; } = (uint)HostId.None;
 
-        public uint MaxMessageLength { get; set; } = NetConfig.MessageMaxLength;
+        internal uint MaxMessageLength { get; set; } = NetConfig.MessageMaxLength;
 
-        public int InferredMtu => _inferredMtu;
+        internal int InferredMtu => _inferredMtu;
 
-        public int PendingPacketCount
+        internal int PendingPacketCount
         {
             get
             {
@@ -40,7 +40,7 @@ namespace Nexum.Core
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public AssembledPacketError PushFragment(
+        internal AssembledPacketError PushFragment(
             UdpMessage message,
             uint srcHostId,
             double currentTime,
@@ -268,7 +268,7 @@ namespace Nexum.Core
             return AssembledPacketError.Assembling;
         }
 
-        public void PruneStalePackets(double currentTime, double timeout = FragmentConfig.AssembleTimeout)
+        internal void PruneStalePackets(double currentTime, double timeout = FragmentConfig.AssembleTimeout)
         {
             _sendersToRemoveCache.Clear();
 
@@ -295,7 +295,7 @@ namespace Nexum.Core
                 _defraggingPackets.TryRemove(sender, out _);
         }
 
-        public void Clear()
+        internal void Clear()
         {
             _defraggingPackets.Clear();
             _inferredMtu = FragmentConfig.MtuLength;
@@ -316,9 +316,9 @@ namespace Nexum.Core
 
     internal readonly struct BufferedFragment
     {
-        public readonly byte[] Data;
+        internal readonly byte[] Data;
 
-        public BufferedFragment(byte[] data)
+        internal BufferedFragment(byte[] data)
         {
             Data = data;
         }

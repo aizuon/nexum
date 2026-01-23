@@ -23,7 +23,7 @@ namespace Nexum.Core
         private KeyParameter _aesKey;
         private KeyParameter _rc4Key;
 
-        public NetCrypt(uint keySize, uint fastKeySize)
+        internal NetCrypt(uint keySize, uint fastKeySize)
         {
             if (keySize == 0)
             {
@@ -48,7 +48,7 @@ namespace Nexum.Core
             }
         }
 
-        public NetCrypt(byte[] secureKey)
+        internal NetCrypt(byte[] secureKey)
         {
             _aesKey = new KeyParameter(secureKey);
         }
@@ -59,12 +59,12 @@ namespace Nexum.Core
             _rc4Key = null;
         }
 
-        public void InitializeFastEncryption(byte[] key)
+        internal void InitializeFastEncryption(byte[] key)
         {
             _rc4Key = new KeyParameter(key);
         }
 
-        public NetMessage CreateEncryptedMessage(NetMessage data)
+        internal NetMessage CreateEncryptedMessage(NetMessage data)
         {
             byte[] encryptedBuffer = Encrypt(data.GetBufferSpan(), data.EncryptMode);
             var encryptedMessage = new NetMessage();
@@ -74,17 +74,17 @@ namespace Nexum.Core
             return encryptedMessage;
         }
 
-        public byte[] GetKey()
+        internal byte[] GetKey()
         {
             return _aesKey?.GetKey();
         }
 
-        public byte[] GetFastKey()
+        internal byte[] GetFastKey()
         {
             return _rc4Key?.GetKey();
         }
 
-        public byte[] EncryptKey(byte[] key)
+        internal byte[] EncryptKey(byte[] key)
         {
             if (_aesKey == null)
                 throw new ObjectDisposedException(GetType().FullName);
@@ -108,7 +108,7 @@ namespace Nexum.Core
             }
         }
 
-        public byte[] DecryptKey(byte[] encryptedKey)
+        internal byte[] DecryptKey(byte[] encryptedKey)
         {
             if (_aesKey == null)
                 throw new ObjectDisposedException(GetType().FullName);
@@ -132,12 +132,12 @@ namespace Nexum.Core
             }
         }
 
-        public byte[] Encrypt(byte[] data, EncryptMode mode)
+        internal byte[] Encrypt(byte[] data, EncryptMode mode)
         {
             return Encrypt(data.AsSpan(), mode);
         }
 
-        public byte[] Encrypt(ReadOnlySpan<byte> data, EncryptMode mode)
+        internal byte[] Encrypt(ReadOnlySpan<byte> data, EncryptMode mode)
         {
             if (_aesKey == null)
                 throw new ObjectDisposedException(GetType().FullName);
@@ -202,12 +202,12 @@ namespace Nexum.Core
             }
         }
 
-        public byte[] Decrypt(byte[] data, EncryptMode mode)
+        internal byte[] Decrypt(byte[] data, EncryptMode mode)
         {
             return Decrypt(data.AsSpan(), mode);
         }
 
-        public byte[] Decrypt(ReadOnlySpan<byte> data, EncryptMode mode)
+        internal byte[] Decrypt(ReadOnlySpan<byte> data, EncryptMode mode)
         {
             if (_aesKey == null)
                 throw new ObjectDisposedException(GetType().FullName);

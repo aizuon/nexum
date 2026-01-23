@@ -16,7 +16,9 @@ namespace Nexum.Core
 
         public ILogger Logger { get; protected set; }
 
-        public ServerType ServerType { get; protected set; }
+        public string ServerName { get; protected set; }
+
+        public Guid ServerGuid { get; protected set; }
 
         internal IChannel Channel { get; set; }
 

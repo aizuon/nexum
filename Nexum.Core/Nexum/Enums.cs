@@ -11,14 +11,6 @@ namespace Nexum.Core
         Connected
     }
 
-    public enum ServerType : byte
-    {
-        Auth,
-        Game,
-        Chat,
-        Relay
-    }
-
     public enum EncryptMode : byte
     {
         None,
@@ -198,16 +190,16 @@ namespace Nexum.Core
 
     public enum FallbackMethod : byte
     {
-        None = 0,
-        PeersUdpToTcp = 1,
-        ServerUdpToTcp = 2,
-        CloseUdpSocket = 3
+        None,
+        PeersUdpToTcp,
+        ServerUdpToTcp,
+        CloseUdpSocket
     }
 
     public enum DirectP2PStartCondition : byte
     {
-        Jit = 0,
-        Always = 1,
-        Last = 2
+        Jit,
+        Always,
+        Last
     }
 }

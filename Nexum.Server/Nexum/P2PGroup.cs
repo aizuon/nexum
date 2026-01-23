@@ -184,6 +184,14 @@ namespace Nexum.Server
 
                 session.RmiToClient((ushort)NexumOpCode.P2PGroup_MemberLeave, p2pGroupMemberLeave);
 
+                foreach (var kvp in memberToLeave.ConnectionStates)
+                {
+                    uint remoteHostId = kvp.Key;
+                    var state = kvp.Value;
+                    if (state?.LastSuccessfulLocalPort > 0)
+                        session.LastSuccessfulP2PLocalPorts[remoteHostId] = state.LastSuccessfulLocalPort;
+                }
+
                 memberToLeave.ConnectionStates.Clear();
 
                 foreach (var member in P2PMembersInternal.Values)

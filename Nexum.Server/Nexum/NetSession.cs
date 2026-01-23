@@ -9,9 +9,24 @@ using DotNetty.Transport.Channels.Sockets;
 using Nexum.Core;
 using Serilog;
 using Constants = Serilog.Core.Constants;
+using BurstDuplicateLogger = Nexum.Core.Logging.BurstDuplicateLogger;
 
 namespace Nexum.Server
 {
+    internal readonly struct P2PRecycleInfo
+    {
+        internal P2PRecycleInfo(IPEndPoint sendAddr, IPEndPoint recvAddr, DateTimeOffset timestamp)
+        {
+            SendAddr = sendAddr;
+            RecvAddr = recvAddr;
+            Timestamp = timestamp;
+        }
+
+        internal IPEndPoint SendAddr { get; }
+        internal IPEndPoint RecvAddr { get; }
+        internal DateTimeOffset Timestamp { get; }
+    }
+
     public class NetSession : IDisposable
     {
         private readonly object _stateLock = new object();
@@ -20,6 +35,9 @@ namespace Nexum.Server
 
         internal readonly ConcurrentDictionary<uint, int> LastSuccessfulP2PLocalPorts =
             new ConcurrentDictionary<uint, int>();
+
+        internal readonly ConcurrentDictionary<uint, P2PRecycleInfo> LastSuccessfulP2PRecycleInfos =
+            new ConcurrentDictionary<uint, P2PRecycleInfo>();
 
         internal readonly ConcurrentQueue<PendingPeerHolepunchRequest> PendingPeerHolepunchRequests =
             new ConcurrentQueue<PendingPeerHolepunchRequest>();
@@ -43,8 +61,10 @@ namespace Nexum.Server
 
             UdpFragBoard.DefragBoard = UdpDefragBoard;
 
-            Logger = Log.ForContext("HostId", HostId).ForContext("EndPoint", RemoteEndPoint.Address.ToString())
-                .ForContext(Constants.SourceContextPropertyName, $"{server.ServerType}Session({HostId})");
+            Logger = BurstDuplicateLogger.WrapForNexumHolepunching(
+                Log.ForContext("HostId", HostId)
+                    .ForContext("EndPoint", RemoteEndPoint.Address.ToString())
+                    .ForContext(Constants.SourceContextPropertyName, $"{server.ServerName}Session({HostId})"));
 
             CreatedTime = GetAbsoluteTime();
         }
@@ -174,7 +194,7 @@ namespace Nexum.Server
             NexumToClient(data);
         }
 
-        public void NexumToClient(NetMessage data)
+        internal void NexumToClient(NetMessage data)
         {
             lock (SendLock)
             {
@@ -209,7 +229,7 @@ namespace Nexum.Server
             NexumToClientUdpIfAvailable(data, reliable: reliable);
         }
 
-        public void NexumToClientUdpIfAvailable(NetMessage data, bool force = false, bool reliable = false)
+        internal void NexumToClientUdpIfAvailable(NetMessage data, bool force = false, bool reliable = false)
         {
             lock (SendLock)
             {

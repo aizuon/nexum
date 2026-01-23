@@ -17,20 +17,20 @@ namespace Nexum.Core
         private int _recentReceiveFrameCount;
         private double _recentReceiveFrameCountStartTime;
 
-        public ReliableUdpReceiver(ReliableUdpHost owner, uint firstFrameNumber)
+        internal ReliableUdpReceiver(ReliableUdpHost owner, uint firstFrameNumber)
         {
             _owner = owner;
             ExpectedFrameNumber = firstFrameNumber;
             _lastReceivedDataFrameNumber = firstFrameNumber;
         }
 
-        public StreamQueue ReceivedStream { get; } = new StreamQueue();
+        internal StreamQueue ReceivedStream { get; } = new StreamQueue();
 
-        public uint ExpectedFrameNumber { get; private set; }
+        internal uint ExpectedFrameNumber { get; private set; }
 
-        public int RecentReceiveSpeed { get; private set; } = ReliableUdpConfig.ReceiveSpeedBeforeUpdate;
+        internal int RecentReceiveSpeed { get; private set; } = ReliableUdpConfig.ReceiveSpeedBeforeUpdate;
 
-        public void FrameMove(double currentTime, double elapsedTime)
+        internal void FrameMove(double currentTime, double elapsedTime)
         {
             if (_recentReceiveFrameCountStartTime == 0.0)
                 _recentReceiveFrameCountStartTime = currentTime;
@@ -50,7 +50,7 @@ namespace Nexum.Core
             }
         }
 
-        public void ProcessReceivedFrame(ReliableUdpFrame frame)
+        internal void ProcessReceivedFrame(ReliableUdpFrame frame)
         {
             switch (frame.Type)
             {
@@ -170,11 +170,11 @@ namespace Nexum.Core
 
         private sealed class ReceiverFrame
         {
-            public readonly byte[] Data;
-            public readonly uint FrameNumber;
+            internal readonly byte[] Data;
+            internal readonly uint FrameNumber;
 
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            public ReceiverFrame(ReliableUdpFrame frame)
+            internal ReceiverFrame(ReliableUdpFrame frame)
             {
                 FrameNumber = frame.FrameNumber;
                 if (frame.Data == null || frame.Data.Length == 0)

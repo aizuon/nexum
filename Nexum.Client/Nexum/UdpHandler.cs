@@ -12,7 +12,7 @@ namespace Nexum.Client
 
         private readonly NetClient _owner;
 
-        public UdpHandler(NetClient owner, int port)
+        internal UdpHandler(NetClient owner, int port)
         {
             _owner = owner;
             _logger = Log.ForContext(Constants.SourceContextPropertyName, $"{nameof(UdpHandler)}({port})");

@@ -9,9 +9,9 @@ namespace Nexum.Core
     {
         private readonly List<Range> _ranges = new List<Range>(8);
 
-        public int Count => _ranges.Count;
+        internal int Count => _ranges.Count;
 
-        public int TotalFrameCount
+        internal int TotalFrameCount
         {
             get
             {
@@ -27,7 +27,7 @@ namespace Nexum.Core
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public void AddSortedNumber(uint frameNumber)
+        internal void AddSortedNumber(uint frameNumber)
         {
             if (_ranges.Count == 0)
             {
@@ -50,7 +50,7 @@ namespace Nexum.Core
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public uint[] Uncompress()
+        internal uint[] Uncompress()
         {
             int totalCount = TotalFrameCount;
             if (totalCount == 0)
@@ -70,7 +70,7 @@ namespace Nexum.Core
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public bool ReadFrom(NetMessage msg)
+        internal bool ReadFrom(NetMessage msg)
         {
             _ranges.Clear();
 
@@ -100,7 +100,7 @@ namespace Nexum.Core
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public void WriteTo(NetMessage msg)
+        internal void WriteTo(NetMessage msg)
         {
             msg.Write(_ranges.Count);
 
@@ -122,12 +122,12 @@ namespace Nexum.Core
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public void Clear()
+        internal void Clear()
         {
             _ranges.Clear();
         }
 
-        public CompressedFrameNumbers Clone()
+        internal CompressedFrameNumbers Clone()
         {
             var clone = new CompressedFrameNumbers();
             for (int i = 0; i < _ranges.Count; i++)
@@ -141,10 +141,10 @@ namespace Nexum.Core
 
         private readonly struct Range
         {
-            public readonly uint Left;
-            public readonly uint Right;
+            internal readonly uint Left;
+            internal readonly uint Right;
 
-            public Range(uint left, uint right)
+            internal Range(uint left, uint right)
             {
                 Left = left;
                 Right = right;

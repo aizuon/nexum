@@ -128,7 +128,7 @@ namespace Nexum.Tests.Integration
             testMessage.Write(11111);
             client.RmiToServerUdpIfAvailable(6004, testMessage, reliable: true);
 
-            Assert.True(messageReceived.Wait(ConnectionTimeout));
+            Assert.True(messageReceived.Wait(GetAdjustedTimeout(ConnectionTimeout)));
             Assert.Equal(11111, receivedValue);
             Assert.False(client.UdpEnabled, "UDP should not be enabled without P2P group");
         }

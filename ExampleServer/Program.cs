@@ -4,7 +4,6 @@ using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
 using BaseLib;
-using Nexum.Core;
 using Nexum.Server;
 using Serilog;
 
@@ -12,6 +11,9 @@ namespace ExampleServer
 {
     public static class Program
     {
+        private const string ServerName = "Relay";
+        private static readonly Guid ServerGuid = new Guid("a43a97d1-9ec7-495e-ad5f-8fe45fde1151");
+
         private static NetServer _server;
 
         public static async Task Main()
@@ -34,7 +36,7 @@ namespace ExampleServer
 #endif
                 .CreateLogger();
 
-            _server = new NetServer(ServerType.Relay);
+            _server = new NetServer(ServerName, ServerGuid);
             _server.OnRMIReceive += (session, _, rmiId) =>
             {
                 switch (rmiId)

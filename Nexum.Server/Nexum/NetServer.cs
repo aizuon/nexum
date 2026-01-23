@@ -55,19 +55,17 @@ namespace Nexum.Server
 
         public OnSessionHandshakingDelegate OnSessionHandshaking = _ => { };
 
-        internal Guid ServerGuid = Guid.NewGuid();
+        internal Guid ServerInstanceGuid = Guid.NewGuid();
 
-        public NetServer(ServerType serverType, NetSettings netSettings = null,
-            bool allowDirectP2P = true)
+        public NetServer(string serverName, Guid serverGuid, NetSettings netSettings = null, bool allowDirectP2P = true)
         {
-            ServerType = serverType;
-            Logger = Log.ForContext(Constants.SourceContextPropertyName, $"{ServerType}Server");
-            RSA = new RSACryptoServiceProvider(2048);
-            NetSettings = CreateNetSettings(netSettings);
-            AllowDirectP2P = allowDirectP2P;
+            ServerName = serverName;
+            ServerGuid = serverGuid;
 
-            if (ServerType == ServerType.Relay)
-                P2PGroupsInternal = new ConcurrentDictionary<uint, P2PGroup>();
+            Logger = Log.ForContext(Constants.SourceContextPropertyName, $"{ServerName}Server");
+            RSA = new RSACryptoServiceProvider(2048);
+            NetSettings = netSettings ?? new NetSettings();
+            AllowDirectP2P = allowDirectP2P;
         }
 
         internal bool UdpEnabled => UdpSockets.Count > 0;
@@ -79,7 +77,8 @@ namespace Nexum.Server
         internal ConcurrentDictionary<uint, NetSession> SessionsInternal { get; } =
             new ConcurrentDictionary<uint, NetSession>();
 
-        internal ConcurrentDictionary<uint, P2PGroup> P2PGroupsInternal { get; }
+        internal ConcurrentDictionary<uint, P2PGroup> P2PGroupsInternal { get; } =
+            new ConcurrentDictionary<uint, P2PGroup>();
 
         internal new NetSettings NetSettings { get; }
 
@@ -215,9 +214,9 @@ namespace Nexum.Server
             {
                 foreach (uint port in udpListenerPorts)
                 {
-                    UdpSockets.TryAdd(port,
-                        new UdpSocket(this, ((IPEndPoint)Channel.LocalAddress).Address.MapToIPv4(), (int)port));
-                    Logger.Debug("UDP listener started on port {UdpPort}", port);
+                    var udpSocket = new UdpSocket(this);
+                    await udpSocket.ListenAsync(((IPEndPoint)Channel.LocalAddress).Address.MapToIPv4(), (int)port);
+                    UdpSockets.TryAdd(port, udpSocket);
                 }
 
                 lock (_udpSocketsCacheLock)
@@ -240,8 +239,8 @@ namespace Nexum.Server
 
         public override void Dispose()
         {
-            Logger.Debug("Shutting down {ServerType} server with {SessionCount} active sessions",
-                ServerType, SessionsInternal.Count);
+            Logger.Debug("Shutting down {ServerName} server with {SessionCount} active sessions",
+                ServerName, SessionsInternal.Count);
 
             _reliableUdpLoop?.Stop();
             _reliableUdpLoop = null;
@@ -330,6 +329,9 @@ namespace Nexum.Server
             if (!AllowDirectP2P)
                 return;
 
+            if (NetSettings.DirectP2PStartCondition == DirectP2PStartCondition.Jit)
+                return;
+
             if (!session.UdpEnabled)
                 return;
 
@@ -367,70 +369,15 @@ namespace Nexum.Server
             }
         }
 
+        internal void EnsureP2PConnectionInitialized(NetSession session, P2PConnectionState stateToTarget,
+            P2PConnectionState stateFromTarget)
+        {
+            InitializeP2PConnection(session, stateToTarget, stateFromTarget);
+        }
+
         internal Task ScheduleAsync(Action<object, object> action, object context, object state, TimeSpan delay)
         {
             return _eventLoopGroup?.ScheduleAsync(action, context, state, delay);
-        }
-
-        private static NetSettings CreateNetSettings(NetSettings provided)
-        {
-            var settings = new NetSettings
-            {
-                EnableServerLog = false,
-                FallbackMethod = FallbackMethod.None,
-                MessageMaxLength = NetConfig.MessageMaxLength,
-                IdleTimeout = NetConfig.NoPingTimeoutTime,
-                DirectP2PStartCondition = DirectP2PStartCondition.Always,
-                OverSendSuspectingThresholdInBytes = NetConfig.DefaultOverSendSuspectingThresholdInBytes,
-                EnableNagleAlgorithm = true,
-                EncryptedMessageKeyLength = NetCrypt.DefaultKeyLength,
-                FastEncryptedMessageKeyLength = NetCrypt.DefaultFastKeyLength,
-                AllowServerAsP2PGroupMember = false,
-                EnableP2PEncryptedMessaging = false,
-                UpnpDetectNatDevice = NetConfig.UpnpDetectNatDeviceByDefault,
-                UpnpTcpAddrPortMapping = NetConfig.UpnpTcpAddrPortMappingByDefault,
-                EnableLookaheadP2PSend = false,
-                EnablePingTest = false,
-                EmergencyLogLineCount = 0
-            };
-
-            if (provided == null)
-                return settings;
-
-            if (provided.EnableServerLog)
-                settings.EnableServerLog = provided.EnableServerLog;
-            if (provided.FallbackMethod != FallbackMethod.None)
-                settings.FallbackMethod = provided.FallbackMethod;
-            if (provided.MessageMaxLength != 0)
-                settings.MessageMaxLength = provided.MessageMaxLength;
-            if (provided.IdleTimeout != 0)
-                settings.IdleTimeout = provided.IdleTimeout;
-            if (provided.DirectP2PStartCondition != DirectP2PStartCondition.Always)
-                settings.DirectP2PStartCondition = provided.DirectP2PStartCondition;
-            if (provided.OverSendSuspectingThresholdInBytes != 0)
-                settings.OverSendSuspectingThresholdInBytes = provided.OverSendSuspectingThresholdInBytes;
-            if (!provided.EnableNagleAlgorithm)
-                settings.EnableNagleAlgorithm = provided.EnableNagleAlgorithm;
-            if (provided.EncryptedMessageKeyLength != 0)
-                settings.EncryptedMessageKeyLength = provided.EncryptedMessageKeyLength;
-            if (provided.FastEncryptedMessageKeyLength != 0)
-                settings.FastEncryptedMessageKeyLength = provided.FastEncryptedMessageKeyLength;
-            if (provided.AllowServerAsP2PGroupMember)
-                settings.AllowServerAsP2PGroupMember = provided.AllowServerAsP2PGroupMember;
-            if (provided.EnableP2PEncryptedMessaging)
-                settings.EnableP2PEncryptedMessaging = provided.EnableP2PEncryptedMessaging;
-            if (!provided.UpnpDetectNatDevice)
-                settings.UpnpDetectNatDevice = provided.UpnpDetectNatDevice;
-            if (!provided.UpnpTcpAddrPortMapping)
-                settings.UpnpTcpAddrPortMapping = provided.UpnpTcpAddrPortMapping;
-            if (provided.EnableLookaheadP2PSend)
-                settings.EnableLookaheadP2PSend = provided.EnableLookaheadP2PSend;
-            if (provided.EnablePingTest)
-                settings.EnablePingTest = provided.EnablePingTest;
-            if (provided.EmergencyLogLineCount != 0)
-                settings.EmergencyLogLineCount = provided.EmergencyLogLineCount;
-
-            return settings;
         }
 
         private void ReliableUdpFrameMove(TimeSpan delta)
@@ -524,6 +471,7 @@ namespace Nexum.Server
 
                 if (!server.AllowDirectP2P)
                     continue;
+
                 foreach (var stateToTarget in member.ConnectionStates.Values)
                 {
                     stateToTarget.RemotePeer.ConnectionStates.TryGetValue(session.HostId, out var stateFromTarget);
@@ -607,6 +555,9 @@ namespace Nexum.Server
                     }
                     else if (!isInitialized)
                     {
+                        if (server.NetSettings.DirectP2PStartCondition == DirectP2PStartCondition.Jit)
+                            continue;
+
                         session.Logger.Debug("Initialize P2P with {TargetHostId}",
                             stateToTarget.RemotePeer.Session.HostId);
                         stateFromTarget.RemotePeer.Session.Logger.Debug("Initialize P2P with {TargetHostId}",
@@ -659,19 +610,88 @@ namespace Nexum.Server
             if (!shouldInitialize)
                 return;
 
-            SendP2PRecycleComplete(session, stateToTarget.RemotePeer.Session.HostId);
-            SendP2PRecycleComplete(stateToTarget.RemotePeer.Session, session.HostId);
+            var targetSession = stateToTarget.RemotePeer.Session;
+            bool canRecycle = false;
+
+            var recycleToTarget = default(P2PRecycleInfo);
+            var recycleToSession = default(P2PRecycleInfo);
+
+            if (session.UdpEnabled && targetSession.UdpEnabled &&
+                stateToTarget.LocalPortReuseSuccess && stateFromTarget.LocalPortReuseSuccess &&
+                session.LastSuccessfulP2PRecycleInfos.TryGetValue(targetSession.HostId, out recycleToTarget) &&
+                targetSession.LastSuccessfulP2PRecycleInfos.TryGetValue(session.HostId, out recycleToSession) &&
+                session.UdpLocalEndPoint != null && session.UdpEndPoint != null &&
+                targetSession.UdpLocalEndPoint != null && targetSession.UdpEndPoint != null &&
+                recycleToTarget.SendAddr != null && recycleToTarget.RecvAddr != null &&
+                recycleToSession.SendAddr != null && recycleToSession.RecvAddr != null)
+            {
+                var now = DateTimeOffset.UtcNow;
+                var recycleWindow = TimeSpan.FromSeconds(HolepunchConfig.NatPortRecycleReuseSeconds);
+                bool withinWindow = now - recycleToTarget.Timestamp <= recycleWindow &&
+                                    now - recycleToSession.Timestamp <= recycleWindow;
+
+                canRecycle = withinWindow;
+            }
+
+            if (canRecycle)
+            {
+                HolepunchHelper.WithOrderedLocks(
+                    session.HostId,
+                    targetSession.HostId,
+                    stateToTarget.StateLock,
+                    stateFromTarget.StateLock,
+                    () =>
+                    {
+                        stateToTarget.PeerUdpHolepunchSuccess = true;
+                        stateFromTarget.PeerUdpHolepunchSuccess = true;
+                        stateToTarget.HolepunchSuccess = true;
+                        stateFromTarget.HolepunchSuccess = true;
+                        stateToTarget.EstablishSent = true;
+                        stateFromTarget.EstablishSent = true;
+                    });
+
+                session.Logger.Debug("P2PRecycleComplete => recycled=true for targetHostId = {TargetHostId}",
+                    targetSession.HostId);
+                targetSession.Logger.Debug("P2PRecycleComplete => recycled=true for targetHostId = {TargetHostId}",
+                    session.HostId);
+
+                SendP2PRecycleComplete(
+                    session,
+                    targetSession.HostId,
+                    true,
+                    targetSession.UdpLocalEndPoint,
+                    targetSession.UdpEndPoint,
+                    recycleToTarget.SendAddr,
+                    recycleToTarget.RecvAddr);
+
+                SendP2PRecycleComplete(
+                    targetSession,
+                    session.HostId,
+                    true,
+                    session.UdpLocalEndPoint,
+                    session.UdpEndPoint,
+                    recycleToSession.SendAddr,
+                    recycleToSession.RecvAddr);
+            }
+            else
+            {
+                SendP2PRecycleComplete(session, targetSession.HostId, false,
+                    DummyEndPoint, DummyEndPoint, DummyEndPoint, DummyEndPoint);
+                SendP2PRecycleComplete(targetSession, session.HostId, false,
+                    DummyEndPoint, DummyEndPoint, DummyEndPoint, DummyEndPoint);
+            }
         }
 
-        private static void SendP2PRecycleComplete(NetSession session, uint targetHostId)
+        private static void SendP2PRecycleComplete(NetSession session, uint targetHostId, bool recycled,
+            IPEndPoint internalAddr, IPEndPoint externalAddr, IPEndPoint sendAddr, IPEndPoint recvAddr)
         {
             var message = new NetMessage();
             message.Write(targetHostId);
-            message.Write(false);
-            message.Write(DummyEndPoint);
-            message.Write(DummyEndPoint);
-            message.Write(DummyEndPoint);
-            message.Write(DummyEndPoint);
+            message.Write(recycled);
+            message.Write(internalAddr ?? DummyEndPoint);
+            message.Write(externalAddr ?? DummyEndPoint);
+            message.Write(sendAddr ?? DummyEndPoint);
+            message.Write(recvAddr ?? DummyEndPoint);
 
             session.RmiToClient((ushort)NexumOpCode.P2PRecycleComplete, message);
         }

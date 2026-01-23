@@ -11,7 +11,7 @@ namespace Nexum.Core
         private static readonly ILogger Logger =
             Log.ForContext(Serilog.Core.Constants.SourceContextPropertyName, nameof(NetZip));
 
-        public static NetMessage CompressPacket(NetMessage message)
+        internal static NetMessage CompressPacket(NetMessage message)
         {
             var compressedMessage = new NetMessage
             {
@@ -32,7 +32,7 @@ namespace Nexum.Core
             return compressedMessage;
         }
 
-        public static byte[] CompressData(byte[] data)
+        internal static byte[] CompressData(byte[] data)
         {
             using (var mem = new MemoryStream())
             using (var zlib = new ZLibStream(mem, CompressionLevel.Optimal))
@@ -43,7 +43,7 @@ namespace Nexum.Core
             }
         }
 
-        public static NetMessage DecompressPacket(NetMessage message)
+        internal static NetMessage DecompressPacket(NetMessage message)
         {
             var decompressedMessage = new NetMessage();
             try

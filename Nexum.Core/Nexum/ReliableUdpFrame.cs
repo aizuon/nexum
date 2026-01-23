@@ -5,20 +5,20 @@ namespace Nexum.Core
 {
     internal sealed class ReliableUdpFrame
     {
-        public ReliableUdpFrame()
+        internal ReliableUdpFrame()
         {
             AckedFrameNumbers = new CompressedFrameNumbers();
         }
 
-        public ReliableUdpFrameType Type { get; set; }
-        public uint FrameNumber { get; set; }
-        public byte[] Data { get; set; }
-        public CompressedFrameNumbers AckedFrameNumbers { get; set; }
-        public uint ExpectedFrameNumber { get; set; }
-        public int RecentReceiveSpeed { get; set; }
+        internal ReliableUdpFrameType Type { get; set; }
+        internal uint FrameNumber { get; set; }
+        internal byte[] Data { get; set; }
+        internal CompressedFrameNumbers AckedFrameNumbers { get; set; }
+        internal uint ExpectedFrameNumber { get; set; }
+        internal int RecentReceiveSpeed { get; set; }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public ReliableUdpFrame Clone()
+        internal ReliableUdpFrame Clone()
         {
             byte[] clonedData = null;
             if (Data != null && Data.Length > 0)

@@ -18,7 +18,7 @@ namespace Nexum.Client
         {
             _owner = owner;
             _logger = Log.ForContext(Constants.SourceContextPropertyName,
-                $"{owner.ServerType}ClientAdapter");
+                $"{owner.ServerName}ClientAdapter");
         }
 
         internal void UpdateLoggerContext(string context)
@@ -30,8 +30,8 @@ namespace Nexum.Client
         {
             base.ChannelInactive(context);
             var remoteAddress = context.Channel.RemoteAddress;
-            _logger.Debug("Client disconnected from {ServerType} at {RemoteAddress}",
-                _owner.ServerType, ((IPEndPoint)remoteAddress).ToIPv4String());
+            _logger.Debug("Client disconnected from {ServerName} at {RemoteAddress}",
+                _owner.ServerName, ((IPEndPoint)remoteAddress).ToIPv4String());
 
             _owner.SetConnectionState(ConnectionState.Disconnected);
         }
@@ -43,8 +43,8 @@ namespace Nexum.Client
             _owner.Channel = context.Channel;
 
             var remoteAddress = context.Channel.RemoteAddress;
-            _logger.Debug("Client connected to {ServerType} at {RemoteAddress}",
-                _owner.ServerType, ((IPEndPoint)remoteAddress).ToIPv4String());
+            _logger.Debug("Client connected to {ServerName} at {RemoteAddress}",
+                _owner.ServerName, ((IPEndPoint)remoteAddress).ToIPv4String());
 
             _owner.SetConnectionState(ConnectionState.Handshaking);
         }

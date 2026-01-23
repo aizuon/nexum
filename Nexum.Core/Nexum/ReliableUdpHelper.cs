@@ -6,7 +6,7 @@ namespace Nexum.Core
     internal static class ReliableUdpHelper
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static NetMessage BuildFrameMessage(ReliableUdpFrame frame)
+        internal static NetMessage BuildFrameMessage(ReliableUdpFrame frame)
         {
             var msg = new NetMessage();
             msg.WriteEnum(MessageType.ReliableUdp_Frame);
@@ -32,7 +32,7 @@ namespace Nexum.Core
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static bool ParseFrame(NetMessage msg, out ReliableUdpFrame frame)
+        internal static bool ParseFrame(NetMessage msg, out ReliableUdpFrame frame)
         {
             frame = new ReliableUdpFrame();
 
@@ -92,7 +92,7 @@ namespace Nexum.Core
             return true;
         }
 
-        public static byte[] WrapPayload(byte[] payload)
+        internal static byte[] WrapPayload(byte[] payload)
         {
             var msg = new NetMessage();
             msg.Write(Constants.TcpSplitter);
@@ -100,7 +100,7 @@ namespace Nexum.Core
             return msg.GetBuffer();
         }
 
-        public static bool UnwrapPayload(byte[] wrappedData, out byte[] payload)
+        internal static bool UnwrapPayload(byte[] wrappedData, out byte[] payload)
         {
             payload = null;
 
