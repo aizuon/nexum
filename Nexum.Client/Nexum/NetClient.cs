@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Net;
+using System.Net.Sockets;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -46,11 +47,11 @@ namespace Nexum.Client
 
         public delegate void OnUdpDisconnectedDelegate();
 
+        private const string UdpBindPortMutexPrefix = "NexumUdpBindPort_";
+
         internal static readonly List<NetClient> Clients = new List<NetClient>();
 
         internal static readonly object ClientsLock = new object();
-
-        private static readonly Mutex _udpConnectMutex = new Mutex(false, "NexumUdpConnectMutex");
 
         private readonly object _recycleLoopLock = new object();
 
@@ -448,54 +449,110 @@ namespace Nexum.Client
                 GarbageSocket(recycled);
             }
 
-            _udpConnectMutex.WaitOne();
-            try
+            int aimPort = targetPort ?? AimForPort;
+            const int maxBindAttempts = 128;
+
+            static bool IsUdpBindFailure(Exception ex)
             {
-                int aimPort = targetPort ?? AimForPort;
+                if (ex is ChannelException)
+                    return true;
+                if (ex is SocketException)
+                    return true;
+
+                if (ex is AggregateException agg)
+                    return agg.Flatten().InnerExceptions.Any(IsUdpBindFailure);
+
+                return ex.InnerException != null && IsUdpBindFailure(ex.InnerException);
+            }
+
+            for (int attempt = 0; attempt < maxBindAttempts; attempt++)
+            {
                 int port = NetUtil.GetAvailablePort(aimPort);
                 bool portReuseSuccess = targetPort.HasValue && port == targetPort.Value;
                 Logger.Debug("Allocating UDP port {Port}", port);
                 AimForPort = (ushort)(port + 1);
 
-                var channel = new Bootstrap()
-                    .Group(_eventLoopGroup)
-                    .Channel<SocketDatagramChannel>()
-                    .Handler(new ActionChannelInitializer<IChannel>(ch =>
-                    {
-                        if (NetworkSimulationProfile != null && !NetworkSimulationProfile.IsIdeal)
-                        {
-                            var handler = new SimulatedUdpChannelHandler(NetworkSimulationProfile);
-                            ch.Pipeline.AddFirst("network-simulation", handler);
-                            NetworkSimulationStats.RegisterHandler(ch, handler);
-                        }
-
-                        UdpPipelineConfigurator?.Invoke(ch.Pipeline);
-
-                        ch.Pipeline
-                            .AddLast(new UdpFrameDecoder(NetConfig.MessageMaxLength))
-                            .AddLast(new UdpFrameEncoder())
-                            .AddLast(new UdpHandler(this, port));
-                    }))
-                    .Option(ChannelOption.SoRcvbuf, NetConfig.UdpIssueRecvLength)
-                    .Option(ChannelOption.SoSndbuf, NetConfig.UdpSendBufferLength)
-                    .Option(ChannelOption.Allocator, UnpooledByteBufferAllocator.Default)
-                    .BindAsync(new IPEndPoint(LocalIP, port))
-                    .GetAwaiter().GetResult();
-
-                Logger.Debug("UDP socket bound on port {Port}", port);
-
-                _ = channel.CloseCompletion.ContinueWith(_ =>
+                Mutex bindMutex = null;
+                bool mutexHeld = false;
+                try
                 {
-                    Logger.Debug("UDP socket on port {Port} closed", port);
-                    NetUtil.ReleasePort(port);
-                });
+                    bindMutex = new Mutex(false, UdpBindPortMutexPrefix + port);
+                    try
+                    {
+                        mutexHeld = bindMutex.WaitOne(0);
+                    }
+                    catch (AbandonedMutexException)
+                    {
+                        mutexHeld = true;
+                    }
 
-                return (channel, port, portReuseSuccess);
+                    if (!mutexHeld)
+                    {
+                        NetUtil.ReleasePort(port);
+                        aimPort = port + 1;
+                        continue;
+                    }
+
+                    var channel = new Bootstrap()
+                        .Group(_eventLoopGroup)
+                        .Channel<SocketDatagramChannel>()
+                        .Handler(new ActionChannelInitializer<IChannel>(ch =>
+                        {
+                            if (NetworkSimulationProfile != null && !NetworkSimulationProfile.IsIdeal)
+                            {
+                                var handler = new SimulatedUdpChannelHandler(NetworkSimulationProfile);
+                                ch.Pipeline.AddFirst("network-simulation", handler);
+                                NetworkSimulationStats.RegisterHandler(ch, handler);
+                            }
+
+                            UdpPipelineConfigurator?.Invoke(ch.Pipeline);
+
+                            ch.Pipeline
+                                .AddLast(new UdpFrameDecoder(NetConfig.MessageMaxLength))
+                                .AddLast(new UdpFrameEncoder())
+                                .AddLast(new UdpHandler(this, port));
+                        }))
+                        .Option(ChannelOption.SoRcvbuf, NetConfig.UdpIssueRecvLength)
+                        .Option(ChannelOption.SoSndbuf, NetConfig.UdpSendBufferLength)
+                        .Option(ChannelOption.Allocator, UnpooledByteBufferAllocator.Default)
+                        .BindAsync(new IPEndPoint(LocalIP, port))
+                        .GetAwaiter().GetResult();
+
+                    Logger.Debug("UDP socket bound on port {Port}", port);
+
+                    _ = channel.CloseCompletion.ContinueWith(_ =>
+                    {
+                        Logger.Debug("UDP socket on port {Port} closed", port);
+                        NetUtil.ReleasePort(port);
+                    });
+
+                    return (channel, port, portReuseSuccess);
+                }
+                catch (Exception ex)
+                {
+                    NetUtil.ReleasePort(port);
+                    aimPort = port + 1;
+
+                    if (IsUdpBindFailure(ex))
+                    {
+                        Logger.Debug(ex, "UDP bind failed on port {Port}, retrying", port);
+                        continue;
+                    }
+
+                    Logger.Error(ex, "Unexpected error while binding UDP on port {Port}", port);
+                    throw;
+                }
+                finally
+                {
+                    if (mutexHeld)
+                        bindMutex.ReleaseMutex();
+
+                    bindMutex?.Dispose();
+                }
             }
-            finally
-            {
-                _udpConnectMutex.ReleaseMutex();
-            }
+
+            throw new InvalidOperationException(
+                $"Failed to allocate/bind an available UDP port after {maxBindAttempts} attempts");
         }
 
         internal void RecycleUdpSocket(IChannel channel, int port)
@@ -585,11 +642,22 @@ namespace Nexum.Client
             UdpEnabled = false;
             SelfUdpSocket = null;
 
+            UnreliablePingLoop?.Stop();
+            UnreliablePingLoop = null;
+            ReliablePingLoopRunning = false;
+            ReliableUdpLoop?.Stop();
+            ReliableUdpLoop = null;
+            _recycleGarbageCollectLoopRunning = false;
+
             if (ToServerReliableUdp != null)
             {
                 ToServerReliableUdp.OnFailed -= OnToServerReliableUdpFailed;
                 ToServerReliableUdp = null;
             }
+
+            foreach (var recycled in RecycledSockets.Values)
+                GarbageSocket(recycled);
+            RecycledSockets.Clear();
 
             UdpChannel?.CloseAsync();
             UdpChannel = null;
@@ -606,7 +674,7 @@ namespace Nexum.Client
 
         internal void StartReliableUdpLoop()
         {
-            if (ReliableUdpLoop != null)
+            if (ReliableUdpLoop != null && ReliableUdpLoop.IsRunning)
                 return;
 
             ReliableUdpLoop = new ThreadLoop(
@@ -672,7 +740,7 @@ namespace Nexum.Client
 
         internal void StartUnreliablePingLoop()
         {
-            if (UnreliablePingLoop != null)
+            if (UnreliablePingLoop != null && UnreliablePingLoop.IsRunning)
                 return;
 
             UnreliablePingLoop = new ThreadLoop(

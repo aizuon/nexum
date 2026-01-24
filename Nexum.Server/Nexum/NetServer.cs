@@ -140,7 +140,7 @@ namespace Nexum.Server
             {
                 newRsa.ImportPkcs8PrivateKey(privateKey, out _);
             }
-            catch
+            catch (Exception)
             {
                 newRsa.ImportRSAPrivateKey(privateKey, out _);
             }
@@ -289,7 +289,7 @@ namespace Nexum.Server
 
         internal void StartReliableUdpLoop()
         {
-            if (_reliableUdpLoop != null)
+            if (_reliableUdpLoop != null && _reliableUdpLoop.IsRunning)
                 return;
 
             _reliableUdpLoop = new ThreadLoop(
@@ -448,11 +448,18 @@ namespace Nexum.Server
                 {
                     var timeSinceLastPing = now - session.LastUdpPing;
                     var timeSinceSetupAttempt = now - session.LastUdpSetupAttempt;
+                    int backoffSeconds =
+                        Math.Min(
+                            (int)HolepunchConfig.UdpSetupRetrySeconds *
+                            (1 << (int)session.UdpRetryCount), 30);
 
                     if (!session.UdpEnabled)
                     {
-                        if (timeSinceSetupAttempt >= UdpSetupRetryInterval)
+                        if (timeSinceSetupAttempt >= TimeSpan.FromSeconds(backoffSeconds) &&
+                            session.UdpRetryCount < HolepunchConfig.MaxRetryAttempts)
                         {
+                            session.UdpRetryCount++;
+
                             server.MagicNumberSessions.TryRemove(session.HolepunchMagicNumber, out var _);
 
                             session.Logger.Debug("Retrying UDP setup for {HostId} (last attempt {Seconds}s ago)",
@@ -502,7 +509,10 @@ namespace Nexum.Server
                             if (isInitialized)
                             {
                                 var diff = now - stateToTarget.LastHolepunch;
-                                int backoffSeconds = Math.Min(8 * (1 << (int)stateToTarget.RetryCount), 120);
+                                int backoffSeconds =
+                                    Math.Min(
+                                        (int)HolepunchConfig.UdpSetupRetrySeconds *
+                                        (1 << (int)stateToTarget.RetryCount), 60);
 
                                 if (stateToTarget.HolepunchSuccess)
                                     return;

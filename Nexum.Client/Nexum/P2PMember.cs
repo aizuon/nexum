@@ -1,6 +1,7 @@
 using System;
 using System.Net;
 using System.Runtime.CompilerServices;
+using System.Threading.Tasks;
 using DotNetty.Transport.Channels;
 using Nexum.Core;
 using Serilog;
@@ -194,30 +195,31 @@ namespace Nexum.Client
             if (Owner.NetSettings.DirectP2PStartCondition != DirectP2PStartCondition.Jit)
                 return;
 
-            uint hostId = HostId;
-
-            lock (P2PMutex)
+            Task.Run(() =>
             {
-                if (IsClosed || DirectP2P)
-                    return;
-
-                if (JitDirectP2PTriggerSent)
-                    return;
-
-                if (PeerUdpChannel == null && SelfUdpLocalSocket != null)
+                lock (P2PMutex)
                 {
-                    int? targetPort = SelfUdpLocalSocket.Port;
-                    (var channel, int port, _) = Owner.ConnectUdp(targetPort);
-                    PeerUdpChannel = channel;
-                    SelfUdpLocalSocket = new IPEndPoint(Owner.LocalIP, port);
+                    if (IsClosed || DirectP2P)
+                        return;
+
+                    if (JitDirectP2PTriggerSent)
+                        return;
+
+                    if (PeerUdpChannel == null && SelfUdpLocalSocket != null)
+                    {
+                        int? targetPort = SelfUdpLocalSocket.Port;
+                        (var channel, int port, _) = Owner.ConnectUdp(targetPort);
+                        PeerUdpChannel = channel;
+                        SelfUdpLocalSocket = new IPEndPoint(Owner.LocalIP, port);
+                    }
+
+                    JitDirectP2PTriggerSent = true;
+
+                    var notifyJitDirectP2PTriggered = new NetMessage();
+                    notifyJitDirectP2PTriggered.Write(HostId);
+                    Owner.RmiToServer((ushort)NexumOpCode.NotifyJitDirectP2PTriggered, notifyJitDirectP2PTriggered);
                 }
-
-                JitDirectP2PTriggerSent = true;
-            }
-
-            var notifyJitDirectP2PTriggered = new NetMessage();
-            notifyJitDirectP2PTriggered.Write(hostId);
-            Owner.RmiToServer((ushort)NexumOpCode.NotifyJitDirectP2PTriggered, notifyJitDirectP2PTriggered);
+            });
         }
 
         internal void InitializeReliableUdp(uint senderFirstFrameNumber, uint receiverExpectedFrameNumber)

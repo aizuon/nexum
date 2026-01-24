@@ -169,7 +169,7 @@ namespace Nexum.Core.Simulation
                             else
                                 packet.Content.Release();
                         }
-                        catch
+                        catch (Exception)
                         {
                             packet.Content.SafeRelease();
                         }
@@ -188,7 +188,7 @@ namespace Nexum.Core.Simulation
                             else
                                 udpMessage.Content.Release();
                         }
-                        catch
+                        catch (Exception)
                         {
                             udpMessage.Content.SafeRelease();
                         }
@@ -513,7 +513,7 @@ namespace Nexum.Core.Simulation
                 if (buffer.ReferenceCount > 0)
                     buffer.Release();
             }
-            catch
+            catch (Exception)
             {
             }
         }

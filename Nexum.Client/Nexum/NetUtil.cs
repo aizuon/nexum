@@ -145,6 +145,7 @@ namespace Nexum.Client
                     FileName = "netsh",
                     Arguments = "int ipv4 show excludedportrange protocol=udp",
                     RedirectStandardOutput = true,
+                    RedirectStandardError = true,
                     UseShellExecute = false,
                     CreateNoWindow = true
                 };
@@ -153,8 +154,24 @@ namespace Nexum.Client
                 if (process == null)
                     return;
 
-                string output = process.StandardOutput.ReadToEnd();
-                process.WaitForExit(5000);
+                var readStdOutTask = process.StandardOutput.ReadToEndAsync();
+                if (!process.WaitForExit(3000))
+                {
+                    try
+                    {
+                        process.Kill(true);
+                    }
+                    catch (Exception)
+                    {
+                    }
+
+                    return;
+                }
+
+                if (!readStdOutTask.Wait(1000))
+                    return;
+
+                string output = readStdOutTask.Result;
 
                 var regex = new Regex(@"^\s*(\d+)\s+(\d+)", RegexOptions.Multiline);
                 foreach (Match match in regex.Matches(output))
@@ -162,7 +179,7 @@ namespace Nexum.Client
                         int.TryParse(match.Groups[2].Value, out int end))
                         _windowsExcludedRanges.Add((start, end));
             }
-            catch
+            catch (Exception)
             {
             }
         }

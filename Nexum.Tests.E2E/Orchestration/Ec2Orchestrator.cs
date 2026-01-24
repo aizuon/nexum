@@ -52,7 +52,7 @@ namespace Nexum.Tests.E2E.Orchestration
                     return _securityGroupId;
                 }
             }
-            catch
+            catch (Exception)
             {
             }
 

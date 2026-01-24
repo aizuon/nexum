@@ -15,7 +15,7 @@ namespace Nexum.Core
         internal const int InitialBackoffDelayMs = 2;
         internal const int MaxBackoffDelayMs = 50;
         internal const int MaxSocketWaitAttempts = 25;
-        internal const double UdpSetupRetrySeconds = 5.0;
+        internal const double UdpSetupRetrySeconds = 8.0;
         internal const double UdpPingTimeoutSeconds = 15.0;
     }
 }

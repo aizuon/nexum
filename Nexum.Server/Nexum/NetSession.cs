@@ -127,6 +127,8 @@ namespace Nexum.Server
 
         internal UdpSocket UdpSocket { get; set; }
 
+        internal uint UdpRetryCount { get; set; }
+
         internal double CreatedTime { get; }
 
         internal bool ConnectTimeoutSent { get; set; }
@@ -314,6 +316,7 @@ namespace Nexum.Server
             UdpSessionInitialized = false;
             UdpEndPointInternal = null;
             UdpLocalEndPointInternal = null;
+            UdpRetryCount = 0;
             ClientUdpLastPing = 0;
             ClientUdpRecentPing = 0;
             ClientUdpJitter = 0;

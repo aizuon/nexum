@@ -174,7 +174,7 @@ namespace Nexum.Tests.Integration
                     await Task.Delay(300);
                 }
             }
-            catch
+            catch (Exception)
             {
             }
 
@@ -182,7 +182,7 @@ namespace Nexum.Tests.Integration
             {
                 client.Dispose();
             }
-            catch
+            catch (Exception)
             {
             }
         }
@@ -199,7 +199,7 @@ namespace Nexum.Tests.Integration
                     {
                         session.Dispose();
                     }
-                    catch
+                    catch (Exception)
                     {
                     }
 
@@ -209,7 +209,7 @@ namespace Nexum.Tests.Integration
 
                 server.Dispose();
             }
-            catch
+            catch (Exception)
             {
             }
         }

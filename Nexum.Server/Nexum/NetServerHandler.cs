@@ -49,11 +49,11 @@ namespace Nexum.Server
                     break;
 
                 case MessageType.Encrypted:
-                    EncryptedHandler(server, session, message);
+                    EncryptedHandler(server, session, message, udpEndPoint);
                     break;
 
                 case MessageType.Compressed:
-                    CompressedHandler(server, session, message);
+                    CompressedHandler(server, session, message, udpEndPoint);
                     break;
 
                 case MessageType.NotifyCSEncryptedSessionKey:
@@ -963,21 +963,23 @@ namespace Nexum.Server
             }
         }
 
-        private static void EncryptedHandler(NetServer server, NetSession session, NetMessage message)
+        private static void EncryptedHandler(NetServer server, NetSession session, NetMessage message,
+            IPEndPoint udpEndPoint)
         {
             NetCoreHandler.HandleEncrypted(
                 message,
                 session.Crypt,
-                decryptedMsg => ReadMessage(server, session, decryptedMsg)
+                decryptedMsg => ReadMessage(server, session, decryptedMsg, udpEndPoint)
             );
         }
 
-        private static void CompressedHandler(NetServer server, NetSession session, NetMessage message)
+        private static void CompressedHandler(NetServer server, NetSession session, NetMessage message,
+            IPEndPoint udpEndPoint)
         {
             NetCoreHandler.HandleCompressed(
                 message,
                 session.Logger,
-                decompressedMsg => ReadMessage(server, session, decompressedMsg)
+                decompressedMsg => ReadMessage(server, session, decompressedMsg, udpEndPoint)
             );
         }
     }
