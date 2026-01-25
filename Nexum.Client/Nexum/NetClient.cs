@@ -226,7 +226,7 @@ namespace Nexum.Client
 
             var connectTask = new Bootstrap()
                 .Group(_eventLoopGroup)
-                .Channel<TcpSocketChannel>()
+                .ChannelFactory(() => new TcpSocketChannel(AddressFamily.InterNetwork))
                 .Handler(new ActionChannelInitializer<ISocketChannel>(channel =>
                 {
                     channel.Pipeline.AddLast(new NexumFrameDecoder(NetConfig.MessageMaxLength));
@@ -461,7 +461,7 @@ namespace Nexum.Client
             {
                 return await new Bootstrap()
                     .Group(_eventLoopGroup)
-                    .Channel<SocketDatagramChannel>()
+                    .ChannelFactory(() => new SocketDatagramChannel(AddressFamily.InterNetwork))
                     .Handler(new ActionChannelInitializer<IChannel>(ch =>
                     {
                         if (NetworkSimulationProfile != null &&

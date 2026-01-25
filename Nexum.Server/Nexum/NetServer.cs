@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
+using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Threading.Tasks;
 using BaseLib;
@@ -192,7 +193,7 @@ namespace Nexum.Server
 
             Channel = await new ServerBootstrap()
                 .Group(_eventLoopGroup)
-                .Channel<TcpServerSocketChannel>()
+                .ChannelFactory(() => new TcpServerSocketChannel(AddressFamily.InterNetwork))
                 .Handler(new ActionChannelInitializer<IServerSocketChannel>(_ => { }))
                 .ChildHandler(new ActionChannelInitializer<ISocketChannel>(ch =>
                 {

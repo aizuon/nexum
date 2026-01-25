@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Sockets;
 using System.Threading.Tasks;
 using DotNetty.Transport.Bootstrapping;
 using DotNetty.Transport.Channels;
@@ -30,7 +31,7 @@ namespace Nexum.Server
             _logger = Log.ForContext(Constants.SourceContextPropertyName, $"{nameof(UdpSocket)}({Port})");
             Channel = await new Bootstrap()
                 .Group(eventLoopGroup)
-                .Channel<SocketDatagramChannel>()
+                .ChannelFactory(() => new SocketDatagramChannel(AddressFamily.InterNetwork))
                 .Handler(new ActionChannelInitializer<IChannel>(ch =>
                 {
                     ch.Pipeline
