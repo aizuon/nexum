@@ -2,6 +2,7 @@ using System;
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
+using System.Threading.Tasks;
 using DotNetty.Transport.Channels;
 using Serilog;
 
@@ -28,10 +29,17 @@ namespace Nexum.Core
 
         internal IPAddress LocalIP => ((IPEndPoint)Channel.LocalAddress).Address.MapToIPv4();
 
+        protected IEventLoopGroup EventLoopGroup { get; set; }
+
         public virtual void Dispose()
         {
             RSA?.Dispose();
             RSA = null;
+        }
+
+        protected Task ScheduleAsync(Action<object, object> action, object context, object state, TimeSpan delay)
+        {
+            return EventLoopGroup.ScheduleAsync(action, context, state, delay);
         }
     }
 }

@@ -9,12 +9,8 @@ namespace Nexum.Core
 {
     internal sealed class UdpPacketDefragBoard
     {
-        private readonly ConcurrentDictionary<IPEndPoint, Dictionary<uint, DefraggingPacket>>
-            _defraggingPackets = new ConcurrentDictionary<IPEndPoint, Dictionary<uint, DefraggingPacket>>();
-
-        private readonly List<uint> _packetIdsToRemoveCache = new List<uint>();
-
-        private readonly List<IPEndPoint> _sendersToRemoveCache = new List<IPEndPoint>();
+        private readonly ConcurrentDictionary<IPEndPoint, ConcurrentDictionary<uint, DefraggingPacket>>
+            _defraggingPackets = new ConcurrentDictionary<IPEndPoint, ConcurrentDictionary<uint, DefraggingPacket>>();
 
         private int _inferredMtu = FragmentConfig.MtuLength;
 
@@ -30,11 +26,7 @@ namespace Nexum.Core
             {
                 int count = 0;
                 foreach (var kvp in _defraggingPackets)
-                    lock (kvp.Value)
-                    {
-                        count += kvp.Value.Count;
-                    }
-
+                    count += kvp.Value.Count;
                 return count;
             }
         }
@@ -100,56 +92,26 @@ namespace Nexum.Core
             }
 
             uint fragmentId = message.FragmentId;
+            uint packetId = message.PacketId;
             var endpoint = message.EndPoint;
-            var packetsForSender = _defraggingPackets.GetOrAdd(endpoint, _ => new Dictionary<uint, DefraggingPacket>());
+            var packetsForSender =
+                _defraggingPackets.GetOrAdd(endpoint, _ => new ConcurrentDictionary<uint, DefraggingPacket>());
 
-            DefraggingPacket defraggingPacket;
-            lock (packetsForSender)
+            var defraggingPacket = packetsForSender.GetOrAdd(packetId, _ => new DefraggingPacket
             {
-                uint packetId = message.PacketId;
-                if (!packetsForSender.TryGetValue(packetId, out defraggingPacket))
+                AssembledData = GC.AllocateUninitializedArray<byte>(packetLength),
+                CreatedTime = currentTime,
+                MtuConfirmed = false
+            });
+
+            bool lockTaken = false;
+            try
+            {
+                defraggingPacket.Lock.Enter(ref lockTaken);
+
+                if (defraggingPacket.AssembledData.Length != packetLength)
                 {
-                    if (fragmentId == 0)
-                    {
-                        int mtuLength = fragmentLength;
-
-                        if (mtuLength < FragmentConfig.MinMtuLength || mtuLength > FragmentConfig.MaxMtuLength)
-                        {
-                            error = $"Invalid MTU inferred from fragment 0: {mtuLength}";
-                            return AssembledPacketError.Error;
-                        }
-
-                        int fragmentCount = UdpPacketFragBoard.GetFragmentCount(packetLength, mtuLength);
-
-                        defraggingPacket = new DefraggingPacket
-                        {
-                            AssembledData = GC.AllocateUninitializedArray<byte>(packetLength),
-                            FragmentReceivedFlags = new bool[fragmentCount],
-                            FragmentsReceivedCount = 0,
-                            TotalFragmentCount = fragmentCount,
-                            CreatedTime = currentTime,
-                            InferredMtu = mtuLength,
-                            MtuConfirmed = true
-                        };
-                        packetsForSender.Add(packetId, defraggingPacket);
-
-                        UpdateInferredMtu(mtuLength);
-                    }
-                    else
-                    {
-                        defraggingPacket = new DefraggingPacket
-                        {
-                            AssembledData = GC.AllocateUninitializedArray<byte>(packetLength),
-                            BufferedFragments = new Dictionary<uint, BufferedFragment>(),
-                            CreatedTime = currentTime,
-                            MtuConfirmed = false
-                        };
-                        packetsForSender.Add(packetId, defraggingPacket);
-                    }
-                }
-                else if (defraggingPacket.AssembledData.Length != packetLength)
-                {
-                    packetsForSender.Remove(packetId);
+                    packetsForSender.TryRemove(packetId, out _);
                     error = "Packet length mismatch between fragments";
                     return AssembledPacketError.Error;
                 }
@@ -162,7 +124,7 @@ namespace Nexum.Core
 
                         if (mtuLength < FragmentConfig.MinMtuLength || mtuLength > FragmentConfig.MaxMtuLength)
                         {
-                            packetsForSender.Remove(packetId);
+                            packetsForSender.TryRemove(packetId, out _);
                             error = $"Invalid MTU inferred from fragment 0: {mtuLength}";
                             return AssembledPacketError.Error;
                         }
@@ -212,6 +174,7 @@ namespace Nexum.Core
                     }
                     else
                     {
+                        defraggingPacket.BufferedFragments ??= new Dictionary<uint, BufferedFragment>();
                         if (!defraggingPacket.BufferedFragments.TryGetValue(fragmentId, out _))
                         {
                             byte[] fragData = GC.AllocateUninitializedArray<byte>(fragmentLength);
@@ -253,7 +216,7 @@ namespace Nexum.Core
 
                 if (defraggingPacket.IsComplete)
                 {
-                    packetsForSender.Remove(packetId);
+                    packetsForSender.TryRemove(packetId, out _);
 
                     assembledPacket = new AssembledPacket
                     {
@@ -264,41 +227,48 @@ namespace Nexum.Core
                     return AssembledPacketError.Ok;
                 }
             }
+            finally
+            {
+                if (lockTaken)
+                    defraggingPacket.Lock.Exit(false);
+            }
 
             return AssembledPacketError.Assembling;
         }
 
         internal void PruneStalePackets(double currentTime, double timeout = FragmentConfig.AssembleTimeout)
         {
-            _sendersToRemoveCache.Clear();
-
             foreach (var kvp in _defraggingPackets)
             {
                 var packetsForSender = kvp.Value;
-                _packetIdsToRemoveCache.Clear();
-
-                lock (packetsForSender)
+                foreach (var packet in packetsForSender)
                 {
-                    foreach (var packet in packetsForSender)
-                        if (currentTime - packet.Value.CreatedTime > timeout)
-                            _packetIdsToRemoveCache.Add(packet.Key);
+                    bool shouldRemove = false;
+                    bool lockTaken = false;
+                    try
+                    {
+                        packet.Value.Lock.Enter(ref lockTaken);
+                        shouldRemove = currentTime - packet.Value.CreatedTime > timeout;
+                    }
+                    finally
+                    {
+                        if (lockTaken)
+                            packet.Value.Lock.Exit(false);
+                    }
 
-                    foreach (uint packetId in _packetIdsToRemoveCache)
-                        packetsForSender.Remove(packetId);
-
-                    if (packetsForSender.Count == 0)
-                        _sendersToRemoveCache.Add(kvp.Key);
+                    if (shouldRemove)
+                        packetsForSender.TryRemove(packet.Key, out _);
                 }
-            }
 
-            foreach (var sender in _sendersToRemoveCache)
-                _defraggingPackets.TryRemove(sender, out _);
+                if (packetsForSender.IsEmpty)
+                    _defraggingPackets.TryRemove(kvp.Key, out _);
+            }
         }
 
         internal void Clear()
         {
             _defraggingPackets.Clear();
-            _inferredMtu = FragmentConfig.MtuLength;
+            Interlocked.Exchange(ref _inferredMtu, FragmentConfig.MtuLength);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]

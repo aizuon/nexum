@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
+using System.Threading;
 
 namespace Nexum.Core
 {
@@ -31,7 +32,7 @@ namespace Nexum.Core
             _currentFrameNumber = firstFrameNumber;
         }
 
-        internal uint NextFrameNumber => _currentFrameNumber++;
+        internal uint NextFrameNumber => Interlocked.Increment(ref _currentFrameNumber) - 1;
 
         internal int PendingFrameCount => _firstSenderWindow.Count + _resendWindow.Count;
         internal int SendStreamLength => _sendStream.Length;

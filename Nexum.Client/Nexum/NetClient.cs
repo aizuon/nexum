@@ -7,7 +7,6 @@ using System.Net;
 using System.Net.Sockets;
 using System.Runtime.CompilerServices;
 using System.Threading.Tasks;
-using BaseLib;
 using BaseLib.Extensions;
 using DotNetty.Buffers;
 using DotNetty.Transport.Bootstrapping;
@@ -52,8 +51,6 @@ namespace Nexum.Client
 
         internal static readonly object ClientsLock = new object();
 
-        private readonly object _recycleLoopLock = new object();
-
         private readonly object _stateLock = new object();
 
         private readonly Stopwatch _stopwatch = Stopwatch.StartNew();
@@ -61,24 +58,19 @@ namespace Nexum.Client
         internal readonly ConcurrentDictionary<uint, byte> PendingP2PConnections =
             new ConcurrentDictionary<uint, byte>();
 
-        internal readonly object RecvLock = new object();
-
         internal readonly ConcurrentDictionary<int, RecycledUdpSocket> RecycledSockets =
             new ConcurrentDictionary<int, RecycledUdpSocket>();
-
-        internal readonly object SendLock = new object();
 
         internal readonly object UdpHolepunchLock = new object();
 
         private ConnectionState _connectionState = ConnectionState.Disconnected;
 
-        private IEventLoopGroup _eventLoopGroup;
-
         private volatile bool _isDisposed;
 
-        private bool _recycleGarbageCollectLoopRunning;
-
-        internal int AimForPort = NetConfig.UdpAimForPort;
+        private EventLoopScheduler _recycleGarbageCollectScheduler;
+        private EventLoopScheduler _reliablePingScheduler;
+        private EventLoopScheduler _toServerReliableUdpScheduler;
+        private EventLoopScheduler _unreliablePingScheduler;
 
         internal NetCrypt Crypt;
 
@@ -101,8 +93,6 @@ namespace Nexum.Client
 
         internal double RecentFrameRate;
         internal double ReliablePingInterval;
-        internal bool ReliablePingLoopRunning;
-        internal ThreadLoop ReliableUdpLoop;
         internal IPEndPoint SelfUdpSocket;
 
         internal Guid ServerInstanceGuid;
@@ -122,8 +112,6 @@ namespace Nexum.Client
         internal UdpPacketDefragBoard UdpDefragBoard;
         internal UdpPacketFragBoard UdpFragBoard;
         internal Guid UdpMagicNumber;
-
-        internal ThreadLoop UnreliablePingLoop;
 
         public NetClient(string serverName, Guid serverGuid)
         {
@@ -222,10 +210,10 @@ namespace Nexum.Client
             SetConnectionState(ConnectionState.Connecting);
             Logger.Debug("Connecting to {Endpoint} with timeout {Timeout}s", ipEndPoint.ToIPv4String(),
                 NetConfig.TcpSocketConnectTimeout);
-            _eventLoopGroup = new MultithreadEventLoopGroup(Math.Clamp(Environment.ProcessorCount / 2, 1, 4));
+            EventLoopGroup = new MultithreadEventLoopGroup(Math.Clamp(Environment.ProcessorCount / 2, 1, 4));
 
             var connectTask = new Bootstrap()
-                .Group(_eventLoopGroup)
+                .Group(EventLoopGroup)
                 .ChannelFactory(() => new TcpSocketChannel(AddressFamily.InterNetwork))
                 .Handler(new ActionChannelInitializer<ISocketChannel>(channel =>
                 {
@@ -249,8 +237,8 @@ namespace Nexum.Client
                 Logger.Warning("TCP connection to {Endpoint} timed out after {Timeout}s", ipEndPoint.ToIPv4String(),
                     NetConfig.TcpSocketConnectTimeout);
                 SetConnectionState(ConnectionState.Disconnected);
-                _eventLoopGroup?.ShutdownGracefullyAsync(TimeSpan.Zero, TimeSpan.Zero);
-                _eventLoopGroup = null;
+                EventLoopGroup?.ShutdownGracefullyAsync(TimeSpan.Zero, TimeSpan.Zero);
+                EventLoopGroup = null;
                 throw new TimeoutException(
                     $"TCP connection to {ipEndPoint.ToIPv4String()} timed out after {NetConfig.TcpSocketConnectTimeout}s");
             }
@@ -351,12 +339,14 @@ namespace Nexum.Client
 
             SetConnectionState(ConnectionState.Disconnected);
 
-            UnreliablePingLoop?.Stop();
-            UnreliablePingLoop = null;
-            ReliablePingLoopRunning = false;
-            ReliableUdpLoop?.Stop();
-            ReliableUdpLoop = null;
-            _recycleGarbageCollectLoopRunning = false;
+            _unreliablePingScheduler?.Stop();
+            _unreliablePingScheduler = null;
+            _reliablePingScheduler?.Stop();
+            _reliablePingScheduler = null;
+            _toServerReliableUdpScheduler?.Stop();
+            _toServerReliableUdpScheduler = null;
+            _recycleGarbageCollectScheduler?.Stop();
+            _recycleGarbageCollectScheduler = null;
 
             if (ToServerReliableUdp != null)
             {
@@ -377,8 +367,8 @@ namespace Nexum.Client
             UdpChannel = null;
             Channel?.CloseAsync();
             Channel = null;
-            _eventLoopGroup?.ShutdownGracefullyAsync(TimeSpan.Zero, TimeSpan.Zero);
-            _eventLoopGroup = null;
+            EventLoopGroup?.ShutdownGracefullyAsync(TimeSpan.Zero, TimeSpan.Zero);
+            EventLoopGroup = null;
 
             lock (ClientsLock)
             {
@@ -460,7 +450,7 @@ namespace Nexum.Client
             async Task<IChannel> BindAsync(int port)
             {
                 return await new Bootstrap()
-                    .Group(_eventLoopGroup)
+                    .Group(EventLoopGroup)
                     .ChannelFactory(() => new SocketDatagramChannel(AddressFamily.InterNetwork))
                     .Handler(new ActionChannelInitializer<IChannel>(ch =>
                     {
@@ -561,50 +551,40 @@ namespace Nexum.Client
 
         private void StartRecycleGarbageCollectLoopIfNeeded()
         {
-            lock (_recycleLoopLock)
-            {
-                if (_recycleGarbageCollectLoopRunning)
-                    return;
-
-                _recycleGarbageCollectLoopRunning = true;
-                ScheduleAsync(DoRecycleGarbageCollect, this, null,
-                    TimeSpan.FromSeconds(HolepunchConfig.NatPortRecycleReuseSeconds / 2));
-            }
+            _recycleGarbageCollectScheduler = EventLoopScheduler.StartIfNeeded(
+                _recycleGarbageCollectScheduler,
+                TimeSpan.FromSeconds(HolepunchConfig.NatPortRecycleReuseSeconds / 2),
+                DoRecycleGarbageCollect,
+                Channel?.EventLoop);
         }
 
-        private static void DoRecycleGarbageCollect(object context, object _)
+        private void DoRecycleGarbageCollect()
         {
-            if (context == null)
+            if (_isDisposed)
+            {
+                _recycleGarbageCollectScheduler?.Stop();
                 return;
+            }
 
-            var client = (NetClient)context;
-
-            if (!client._recycleGarbageCollectLoopRunning)
-                return;
-
-            double currentTime = client.GetAbsoluteTime();
+            double currentTime = GetAbsoluteTime();
             double expirationTime = HolepunchConfig.NatPortRecycleReuseSeconds + 10.0;
 
-            foreach (var kvp in client.RecycledSockets)
+            foreach (var kvp in RecycledSockets)
             {
                 var recycled = kvp.Value;
                 if (currentTime - recycled.RecycleTime > expirationTime)
-                    if (client.RecycledSockets.TryRemove(kvp.Key, out var removed))
+                    if (RecycledSockets.TryRemove(kvp.Key, out var removed))
                     {
-                        client.Logger.Debug("Garbage collecting expired recycled socket on port {Port}", removed.Port);
-                        client.GarbageSocket(removed);
+                        Logger.Debug("Garbage collecting expired recycled socket on port {Port}", removed.Port);
+                        GarbageSocket(removed);
                     }
             }
 
-            if (client.RecycledSockets.IsEmpty)
-                lock (client._recycleLoopLock)
-                {
-                    client._recycleGarbageCollectLoopRunning = false;
-                    return;
-                }
-
-            client.ScheduleAsync(DoRecycleGarbageCollect, client, null,
-                TimeSpan.FromSeconds(HolepunchConfig.NatPortRecycleReuseSeconds / 2));
+            if (RecycledSockets.IsEmpty)
+            {
+                _recycleGarbageCollectScheduler?.Stop();
+                _recycleGarbageCollectScheduler = null;
+            }
         }
 
         internal void CloseUdp()
@@ -614,12 +594,14 @@ namespace Nexum.Client
             UdpEnabled = false;
             SelfUdpSocket = null;
 
-            UnreliablePingLoop?.Stop();
-            UnreliablePingLoop = null;
-            ReliablePingLoopRunning = false;
-            ReliableUdpLoop?.Stop();
-            ReliableUdpLoop = null;
-            _recycleGarbageCollectLoopRunning = false;
+            _unreliablePingScheduler?.Stop();
+            _unreliablePingScheduler = null;
+            _reliablePingScheduler?.Stop();
+            _reliablePingScheduler = null;
+            _toServerReliableUdpScheduler?.Stop();
+            _toServerReliableUdpScheduler = null;
+            _recycleGarbageCollectScheduler?.Stop();
+            _recycleGarbageCollectScheduler = null;
 
             if (ToServerReliableUdp != null)
             {
@@ -647,13 +629,11 @@ namespace Nexum.Client
 
         internal void StartReliableUdpLoop()
         {
-            if (ReliableUdpLoop != null && ReliableUdpLoop.IsRunning)
-                return;
-
-            ReliableUdpLoop = new ThreadLoop(
+            _toServerReliableUdpScheduler = EventLoopScheduler.StartIfNeeded(
+                _toServerReliableUdpScheduler,
                 TimeSpan.FromMilliseconds(ReliableUdpConfig.FrameMoveInterval * 1000),
-                ReliableUdpFrameMove);
-            ReliableUdpLoop.Start();
+                ReliableUdpFrameMove,
+                Channel?.EventLoop);
         }
 
         internal void InitializeToServerReliableUdp(uint firstFrameNumber)
@@ -677,56 +657,43 @@ namespace Nexum.Client
 
         internal void StartReliablePingLoop(double interval)
         {
-            if (ReliablePingLoopRunning)
-                return;
-
-            ReliablePingLoopRunning = true;
             ReliablePingInterval = interval;
-            ScheduleAsync(SendReliablePingScheduled, this, null, TimeSpan.FromSeconds(interval));
+            _reliablePingScheduler = EventLoopScheduler.StartIfNeeded(
+                _reliablePingScheduler,
+                TimeSpan.FromSeconds(interval),
+                SendReliablePing,
+                Channel?.EventLoop);
         }
 
-        internal Task ScheduleAsync(Action<object, object> action, object context, object state, TimeSpan delay)
+        private void SendReliablePing()
         {
-            return _eventLoopGroup?.ScheduleAsync(action, context, state, delay);
-        }
-
-        private static void SendReliablePingScheduled(object context, object _)
-        {
-            if (context == null)
+            if (_isDisposed)
                 return;
 
-            var client = (NetClient)context;
-
-            if (!client.ReliablePingLoopRunning)
-                return;
-
-            if (client.ConnectionState == ConnectionState.Connected)
+            if (ConnectionState == ConnectionState.Connected)
             {
                 var reliablePingMsg = new NetMessage();
-                reliablePingMsg.Write(client.RecentFrameRate);
-                client.RmiToServer((ushort)NexumOpCode.ReliablePing, reliablePingMsg);
+                reliablePingMsg.Write(RecentFrameRate);
+                RmiToServer((ushort)NexumOpCode.ReliablePing, reliablePingMsg);
             }
-
-            client.ScheduleAsync(SendReliablePingScheduled, client, null,
-                TimeSpan.FromSeconds(client.ReliablePingInterval));
         }
 
         internal void StartUnreliablePingLoop()
         {
-            if (UnreliablePingLoop != null && UnreliablePingLoop.IsRunning)
-                return;
-
-            UnreliablePingLoop = new ThreadLoop(
+            _unreliablePingScheduler = EventLoopScheduler.StartIfNeeded(
+                _unreliablePingScheduler,
                 TimeSpan.FromSeconds(ReliableUdpConfig.CsPingInterval),
-                SendUdpPing);
-            UnreliablePingLoop.Start();
+                SendUnreliablePing,
+                Channel?.EventLoop);
         }
 
-        internal void SendUdpPing(TimeSpan delta)
+        private void SendUnreliablePing()
         {
+            if (_isDisposed)
+                return;
+
             double currentTime = GetAbsoluteTime();
 
-            UpdateFrameRate(delta.TotalSeconds);
             CheckServerUdpTimeout(currentTime);
 
             int paddingSize = ServerMtuDiscovery.GetProbePaddingSize(currentTime);
@@ -769,47 +736,41 @@ namespace Nexum.Client
 
         internal void NexumToServer(NetMessage data)
         {
-            lock (SendLock)
-            {
-                if (data.Compress)
-                    data = NetZip.CompressPacket(data);
-                if (data.Encrypt && Crypt != null)
-                    data = Crypt.CreateEncryptedMessage(data);
+            if (data.Compress)
+                data = NetZip.CompressPacket(data);
+            if (data.Encrypt && Crypt != null)
+                data = Crypt.CreateEncryptedMessage(data);
 
-                var message = new NetMessage();
-                message.Write((ByteArray)data);
-                ToServer(message);
-            }
+            var message = new NetMessage();
+            message.Write((ByteArray)data);
+            ToServer(message);
         }
 
         internal void NexumToServerUdpIfAvailable(NetMessage data, bool force = false, bool reliable = false)
         {
             RequestServerUdpSocketReady_FirstTimeOnly();
 
-            lock (SendLock)
-            {
-                data.Reliable = reliable;
-                if (data.Compress)
-                    data = NetZip.CompressPacket(data);
-                if (data.Encrypt && Crypt != null)
-                    data = Crypt.CreateEncryptedMessage(data);
+            data.Reliable = reliable;
+            if (data.Compress)
+                data = NetZip.CompressPacket(data);
+            if (data.Encrypt && Crypt != null)
+                data = Crypt.CreateEncryptedMessage(data);
 
-                if ((UdpEnabled || force) && UdpChannel != null && ServerUdpSocket != null)
+            if ((UdpEnabled || force) && UdpChannel != null && ServerUdpSocket != null)
+            {
+                if (reliable && ToServerReliableUdp != null)
                 {
-                    if (reliable && ToServerReliableUdp != null)
-                    {
-                        byte[] wrappedData = ReliableUdpHelper.WrapPayload(data.GetBuffer());
-                        ToServerReliableUdp.Send(wrappedData, wrappedData.Length);
-                    }
-                    else
-                    {
-                        ToServerUdp(data);
-                    }
+                    byte[] wrappedData = ReliableUdpHelper.WrapPayload(data.GetBuffer());
+                    ToServerReliableUdp.Send(wrappedData, wrappedData.Length);
                 }
-                else if (!force)
+                else
                 {
-                    NexumToServer(data);
+                    ToServerUdp(data);
                 }
+            }
+            else if (!force)
+            {
+                NexumToServer(data);
             }
         }
 
@@ -847,11 +808,8 @@ namespace Nexum.Client
 
         private void SendReliableUdpFrameToServer(ReliableUdpFrame frame)
         {
-            lock (SendLock)
-            {
-                var msg = ReliableUdpHelper.BuildFrameMessage(frame);
-                ToServerUdp(msg);
-            }
+            var msg = ReliableUdpHelper.BuildFrameMessage(frame);
+            ToServerUdp(msg);
         }
 
         private void OnToServerReliableUdpFailed()
@@ -869,18 +827,16 @@ namespace Nexum.Client
             RmiToServer((ushort)NexumOpCode.C2S_RequestCreateUdpSocket, new NetMessage());
         }
 
-        private void ReliableUdpFrameMove(TimeSpan delta)
+        private void ReliableUdpFrameMove(double elapsedTime)
         {
-            double elapsedTime = delta.TotalSeconds;
+            if (_isDisposed)
+                return;
+
             double currentTime = GetAbsoluteTime();
 
+            UpdateFrameRate(elapsedTime);
             ToServerReliableUdp?.FrameMove(elapsedTime);
             UdpDefragBoard.PruneStalePackets(currentTime);
-
-            if (P2PGroup != null)
-                foreach (var member in P2PGroup.P2PMembersInternal.Values)
-                    if (!member.IsClosed)
-                        member.FrameMove(elapsedTime);
         }
 
         private void UpdateFrameRate(double deltaSeconds)

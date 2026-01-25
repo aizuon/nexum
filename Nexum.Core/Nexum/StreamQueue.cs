@@ -1,14 +1,15 @@
 using System;
 using System.Runtime.CompilerServices;
+using System.Threading;
 
 namespace Nexum.Core
 {
     public sealed class StreamQueue
     {
-        private readonly object _lock = new object();
         private byte[] _buffer;
         private int _count;
         private int _head;
+        private SpinLock _spinLock = new SpinLock(false);
         private int _tail;
 
         public StreamQueue(int initialCapacity = 4096)
@@ -23,9 +24,16 @@ namespace Nexum.Core
         {
             get
             {
-                lock (_lock)
+                bool lockTaken = false;
+                try
                 {
+                    _spinLock.Enter(ref lockTaken);
                     return _count;
+                }
+                finally
+                {
+                    if (lockTaken)
+                        _spinLock.Exit(false);
                 }
             }
         }
@@ -35,8 +43,10 @@ namespace Nexum.Core
             if (length <= 0)
                 return;
 
-            lock (_lock)
+            bool lockTaken = false;
+            try
             {
+                _spinLock.Enter(ref lockTaken);
                 EnsureCapacity(_count + length);
 
                 int firstPart = Math.Min(length, _buffer.Length - _tail);
@@ -50,6 +60,11 @@ namespace Nexum.Core
                 _tail = (_tail + length) % _buffer.Length;
                 _count += length;
             }
+            finally
+            {
+                if (lockTaken)
+                    _spinLock.Exit(false);
+            }
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -58,8 +73,10 @@ namespace Nexum.Core
             if (length <= 0)
                 return;
 
-            lock (_lock)
+            bool lockTaken = false;
+            try
             {
+                _spinLock.Enter(ref lockTaken);
                 if (length > _count)
                     length = _count;
 
@@ -72,12 +89,19 @@ namespace Nexum.Core
                     _tail = 0;
                 }
             }
+            finally
+            {
+                if (lockTaken)
+                    _spinLock.Exit(false);
+            }
         }
 
         public void GetBlockedData(ref byte[] dest, int length)
         {
-            lock (_lock)
+            bool lockTaken = false;
+            try
             {
+                _spinLock.Enter(ref lockTaken);
                 if (length > _count)
                     length = _count;
 
@@ -92,25 +116,44 @@ namespace Nexum.Core
                 if (secondPart > 0)
                     Buffer.BlockCopy(_buffer, 0, dest, firstPart, secondPart);
             }
+            finally
+            {
+                if (lockTaken)
+                    _spinLock.Exit(false);
+            }
         }
 
         public byte[] PeekAll()
         {
-            lock (_lock)
+            bool lockTaken = false;
+            try
             {
+                _spinLock.Enter(ref lockTaken);
                 byte[] result = GC.AllocateUninitializedArray<byte>(_count);
                 GetBlockedDataUnsafe(result, _count);
                 return result;
+            }
+            finally
+            {
+                if (lockTaken)
+                    _spinLock.Exit(false);
             }
         }
 
         public void Clear()
         {
-            lock (_lock)
+            bool lockTaken = false;
+            try
             {
+                _spinLock.Enter(ref lockTaken);
                 _head = 0;
                 _tail = 0;
                 _count = 0;
+            }
+            finally
+            {
+                if (lockTaken)
+                    _spinLock.Exit(false);
             }
         }
 

@@ -6,7 +6,6 @@ using System.Net;
 using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Threading.Tasks;
-using BaseLib;
 using BaseLib.Extensions;
 using DotNetty.Handlers.Timeout;
 using DotNetty.Transport.Bootstrapping;
@@ -33,17 +32,13 @@ namespace Nexum.Server
 
         public delegate void OnSessionHandshakingDelegate(NetSession session);
 
-        private static readonly TimeSpan UdpSetupRetryInterval =
-            TimeSpan.FromSeconds(HolepunchConfig.UdpSetupRetrySeconds);
-
         private static readonly TimeSpan ConnectTimeoutCheckInterval = TimeSpan.FromSeconds(2);
 
         private static readonly IPEndPoint DummyEndPoint = new IPEndPoint(IPAddress.Parse("255.255.255.255"), 65535);
-        private readonly object _udpSocketsCacheLock = new object();
 
-        private IEventLoopGroup _eventLoopGroup;
 
-        private ThreadLoop _reliableUdpLoop;
+        private EventLoopScheduler _connectTimeoutScheduler;
+        private EventLoopScheduler _retryUdpOrHolepunchScheduler;
         private UdpSocket[] _udpSocketsCache;
 
         public OnRMIReceiveDelegate OnRMIReceive = (_, _, _) => { };
@@ -187,12 +182,12 @@ namespace Nexum.Server
 
         public async Task ListenAsync(IPEndPoint endPoint, uint[] udpListenerPorts = null)
         {
-            _eventLoopGroup = new MultithreadEventLoopGroup();
+            EventLoopGroup = new MultithreadEventLoopGroup();
 
             IPAddress = endPoint.Address;
 
             Channel = await new ServerBootstrap()
-                .Group(_eventLoopGroup)
+                .Group(EventLoopGroup)
                 .ChannelFactory(() => new TcpServerSocketChannel(AddressFamily.InterNetwork))
                 .Handler(new ActionChannelInitializer<IServerSocketChannel>(_ => { }))
                 .ChildHandler(new ActionChannelInitializer<ISocketChannel>(ch =>
@@ -217,18 +212,15 @@ namespace Nexum.Server
                 {
                     var udpSocket = new UdpSocket(this);
                     await udpSocket.ListenAsync(((IPEndPoint)Channel.LocalAddress).Address.MapToIPv4(), (int)port,
-                        _eventLoopGroup).ConfigureAwait(false);
+                        EventLoopGroup).ConfigureAwait(false);
                     UdpSockets.TryAdd(port, udpSocket);
                 }
 
-                lock (_udpSocketsCacheLock)
-                {
-                    _udpSocketsCache = UdpSockets.Values.ToArray();
-                }
+                _udpSocketsCache = UdpSockets.Values.ToArray();
             }
 
-            RetryUdpOrHolepunchIfRequired(this, null);
-            CheckConnectTimeouts(this, null);
+            StartRetryUdpOrHolepunchScheduler();
+            StartConnectTimeoutScheduler();
 
             Logger.Debug("Listening on {Endpoint}", endPoint.ToIPv4String());
 
@@ -244,8 +236,10 @@ namespace Nexum.Server
             Logger.Debug("Shutting down {ServerName} server with {SessionCount} active sessions",
                 ServerName, SessionsInternal.Count);
 
-            _reliableUdpLoop?.Stop();
-            _reliableUdpLoop = null;
+            _connectTimeoutScheduler?.Stop();
+            _connectTimeoutScheduler = null;
+            _retryUdpOrHolepunchScheduler?.Stop();
+            _retryUdpOrHolepunchScheduler = null;
 
             foreach (var soc in UdpSockets.Values)
                 soc.Close();
@@ -259,8 +253,8 @@ namespace Nexum.Server
 
             Channel?.CloseAsync();
             Channel = null;
-            _eventLoopGroup?.ShutdownGracefullyAsync(TimeSpan.Zero, TimeSpan.Zero);
-            _eventLoopGroup = null;
+            EventLoopGroup?.ShutdownGracefullyAsync(TimeSpan.Zero, TimeSpan.Zero);
+            EventLoopGroup = null;
 
             base.Dispose();
         }
@@ -288,15 +282,22 @@ namespace Nexum.Server
             }
         }
 
-        internal void StartReliableUdpLoop()
+        private void StartConnectTimeoutScheduler()
         {
-            if (_reliableUdpLoop != null && _reliableUdpLoop.IsRunning)
-                return;
+            _connectTimeoutScheduler = EventLoopScheduler.StartIfNeeded(
+                _connectTimeoutScheduler,
+                ConnectTimeoutCheckInterval,
+                CheckConnectTimeouts,
+                Channel?.EventLoop);
+        }
 
-            _reliableUdpLoop = new ThreadLoop(
-                TimeSpan.FromMilliseconds(ReliableUdpConfig.FrameMoveInterval * 1000),
-                ReliableUdpFrameMove);
-            _reliableUdpLoop.Start();
+        private void StartRetryUdpOrHolepunchScheduler()
+        {
+            _retryUdpOrHolepunchScheduler = EventLoopScheduler.StartIfNeeded(
+                _retryUdpOrHolepunchScheduler,
+                TimeSpan.FromMilliseconds(HolepunchConfig.RetryIntervalMs),
+                RetryUdpOrHolepunchIfRequired,
+                Channel?.EventLoop);
         }
 
         internal void InitiateUdpSetup(NetSession session)
@@ -317,13 +318,8 @@ namespace Nexum.Server
 
         internal UdpSocket GetRandomUdpSocket()
         {
-            lock (_udpSocketsCacheLock)
-            {
-                if (_udpSocketsCache == null || _udpSocketsCache.Length != UdpSockets.Count)
-                    _udpSocketsCache = UdpSockets.Values.ToArray();
-                int socketIndex = Random.Shared.Next(_udpSocketsCache.Length);
-                return _udpSocketsCache[socketIndex];
-            }
+            int socketIndex = Random.Shared.Next(_udpSocketsCache.Length);
+            return _udpSocketsCache[socketIndex];
         }
 
         internal void InitiateP2PConnections(NetSession session)
@@ -377,28 +373,12 @@ namespace Nexum.Server
             InitializeP2PConnection(session, stateToTarget, stateFromTarget);
         }
 
-        internal Task ScheduleAsync(Action<object, object> action, object context, object state, TimeSpan delay)
+        private void CheckConnectTimeouts()
         {
-            return _eventLoopGroup?.ScheduleAsync(action, context, state, delay);
-        }
-
-        private void ReliableUdpFrameMove(TimeSpan delta)
-        {
-            double elapsedTime = delta.TotalSeconds;
-
-            foreach (var session in SessionsInternal.Values)
-                if (!session.IsDisposed)
-                    session.ReliableUdpFrameMove(elapsedTime);
-        }
-
-        private static void CheckConnectTimeouts(object context, object _)
-        {
-            if (context == null)
+            if (Channel == null)
                 return;
 
-            var server = (NetServer)context;
-
-            foreach (var session in server.SessionsInternal.Values)
+            foreach (var session in SessionsInternal.Values)
             {
                 if (!session.IsConnected)
                 {
@@ -426,22 +406,18 @@ namespace Nexum.Server
                     }
                 }
             }
-
-            server.ScheduleAsync(CheckConnectTimeouts, server, null, ConnectTimeoutCheckInterval);
         }
 
-        private static void RetryUdpOrHolepunchIfRequired(object context, object _)
+        private void RetryUdpOrHolepunchIfRequired()
         {
-            if (context == null)
+            if (Channel == null)
                 return;
 
-            var server = (NetServer)context;
-
-            if (!server.UdpEnabled)
+            if (!UdpEnabled)
                 return;
 
             var now = DateTimeOffset.Now;
-            foreach (var group in server.P2PGroupsInternal.Values)
+            foreach (var group in P2PGroupsInternal.Values)
             foreach (var member in group.P2PMembersInternal.Values)
             {
                 var session = member.Session;
@@ -461,24 +437,24 @@ namespace Nexum.Server
                         {
                             session.UdpRetryCount++;
 
-                            server.MagicNumberSessions.TryRemove(session.HolepunchMagicNumber, out var _);
+                            MagicNumberSessions.TryRemove(session.HolepunchMagicNumber, out _);
 
                             session.Logger.Debug("Retrying UDP setup for {HostId} (last attempt {Seconds}s ago)",
                                 session.HostId, (int)timeSinceSetupAttempt.TotalSeconds);
 
-                            server.SendUdpSocketRequest(session);
+                            SendUdpSocketRequest(session);
                         }
                     }
                     else if (timeSinceLastPing >= TimeSpan.FromSeconds(HolepunchConfig.UdpPingTimeoutSeconds))
                     {
                         session.Logger.Debug("Fallback to TCP relay by server => {HostId}", session.HostId);
                         session.ResetUdp();
-                        server.UdpSessions.TryRemove(FilterTag.Create(session.HostId, (uint)HostId.Server), out var _);
+                        UdpSessions.TryRemove(FilterTag.Create(session.HostId, (uint)HostId.Server), out _);
                         session.RmiToClient((ushort)NexumOpCode.NotifyUdpToTcpFallbackByServer, new NetMessage());
                     }
                 }
 
-                if (!server.AllowDirectP2P)
+                if (!AllowDirectP2P)
                     continue;
 
                 foreach (var stateToTarget in member.ConnectionStates.Values)
@@ -567,7 +543,7 @@ namespace Nexum.Server
                     }
                     else if (!isInitialized)
                     {
-                        if (server.NetSettings.DirectP2PStartCondition == DirectP2PStartCondition.Jit)
+                        if (NetSettings.DirectP2PStartCondition == DirectP2PStartCondition.Jit)
                             continue;
 
                         session.Logger.Debug("Initialize P2P with {TargetHostId}",
@@ -579,9 +555,6 @@ namespace Nexum.Server
                     }
                 }
             }
-
-            server.ScheduleAsync(RetryUdpOrHolepunchIfRequired, server, null,
-                TimeSpan.FromMilliseconds(HolepunchConfig.RetryIntervalMs));
         }
 
         private void SendUdpSocketRequest(NetSession session)

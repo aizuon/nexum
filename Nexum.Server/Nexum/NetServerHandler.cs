@@ -12,21 +12,18 @@ namespace Nexum.Server
         internal static void ReadFrame(NetServer server, NetSession session, NetMessage message,
             IPEndPoint udpEndPoint = null, bool bypass = false)
         {
-            lock (session.RecvLock)
+            if (bypass)
             {
-                if (bypass)
-                {
-                    ReadMessage(server, session, message, udpEndPoint);
-                    return;
-                }
-
-                var packet = new ByteArray();
-                if (!message.Read(ref packet))
-                    return;
-
-                var innerMessage = new NetMessage(packet);
-                ReadMessage(server, session, innerMessage, udpEndPoint);
+                ReadMessage(server, session, message, udpEndPoint);
+                return;
             }
+
+            var packet = new ByteArray();
+            if (!message.Read(ref packet))
+                return;
+
+            var innerMessage = new NetMessage(packet);
+            ReadMessage(server, session, innerMessage, udpEndPoint);
         }
 
         internal static void ReadMessage(NetServer server, NetSession session, NetMessage message,
@@ -432,8 +429,6 @@ namespace Nexum.Server
             if (session.P2PGroup != null &&
                 session.P2PGroup.P2PMembersInternal.TryGetValue(session.HostId, out var member))
                 session.InitializeToClientReliableUdp(member.P2PFirstFrameNumber);
-
-            server.StartReliableUdpLoop();
 
             session.NexumToClientUdpIfAvailable(
                 HolepunchHelper.CreateNotifyClientServerUdpMatchedMessage(capturedMagicNumber), true);

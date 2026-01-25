@@ -1,12 +1,11 @@
 using System;
 using System.Runtime.CompilerServices;
+using System.Threading;
 
 namespace Nexum.Core
 {
     internal sealed class MtuDiscovery
     {
-        private readonly object _lock = new object();
-
         private int _confirmedMtu = MtuConfig.DefaultMtu;
         private bool _discoveryComplete;
         private int _failureCount;
@@ -19,6 +18,7 @@ namespace Nexum.Core
         private int _lowBound = MtuConfig.MinMtu;
         private bool _probeInFlight;
         private int _probingMtu;
+        private SpinLock _spinLock = new SpinLock(false);
 
         private int _successCount;
 
@@ -26,9 +26,16 @@ namespace Nexum.Core
         {
             get
             {
-                lock (_lock)
+                bool lockTaken = false;
+                try
                 {
+                    _spinLock.Enter(ref lockTaken);
                     return _confirmedMtu;
+                }
+                finally
+                {
+                    if (lockTaken)
+                        _spinLock.Exit(false);
                 }
             }
         }
@@ -37,9 +44,16 @@ namespace Nexum.Core
         {
             get
             {
-                lock (_lock)
+                bool lockTaken = false;
+                try
                 {
+                    _spinLock.Enter(ref lockTaken);
                     return _discoveryComplete;
+                }
+                finally
+                {
+                    if (lockTaken)
+                        _spinLock.Exit(false);
                 }
             }
         }
@@ -48,9 +62,16 @@ namespace Nexum.Core
         {
             get
             {
-                lock (_lock)
+                bool lockTaken = false;
+                try
                 {
+                    _spinLock.Enter(ref lockTaken);
                     return _probeInFlight ? _probingMtu : 0;
+                }
+                finally
+                {
+                    if (lockTaken)
+                        _spinLock.Exit(false);
                 }
             }
         }
@@ -58,8 +79,11 @@ namespace Nexum.Core
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal int GetProbePaddingSize(double currentTime)
         {
-            lock (_lock)
+            bool lockTaken = false;
+            try
             {
+                _spinLock.Enter(ref lockTaken);
+
                 if (_discoveryComplete)
                     return 0;
 
@@ -88,13 +112,21 @@ namespace Nexum.Core
                 int padding = _probingMtu - MtuConfig.HeaderOverhead;
                 return Math.Max(0, padding);
             }
+            finally
+            {
+                if (lockTaken)
+                    _spinLock.Exit(false);
+            }
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal void OnPongReceived(int receivedPaddingSize, double currentTime)
         {
-            lock (_lock)
+            bool lockTaken = false;
+            try
             {
+                _spinLock.Enter(ref lockTaken);
+
                 if (_discoveryComplete)
                     return;
 
@@ -117,18 +149,31 @@ namespace Nexum.Core
                     }
                 }
             }
+            finally
+            {
+                if (lockTaken)
+                    _spinLock.Exit(false);
+            }
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal void Update(double currentTime)
         {
-            lock (_lock)
+            bool lockTaken = false;
+            try
             {
+                _spinLock.Enter(ref lockTaken);
+
                 if (_discoveryComplete)
                     return;
 
                 if (_probeInFlight && currentTime - _lastProbeSentTime > MtuConfig.ProbeTimeoutSeconds)
                     HandleProbeTimeout();
+            }
+            finally
+            {
+                if (lockTaken)
+                    _spinLock.Exit(false);
             }
         }
 
@@ -153,8 +198,11 @@ namespace Nexum.Core
 
         internal void Reset()
         {
-            lock (_lock)
+            bool lockTaken = false;
+            try
             {
+                _spinLock.Enter(ref lockTaken);
+
                 _confirmedMtu = MtuConfig.DefaultMtu;
                 _probingMtu = 0;
                 _lowBound = MtuConfig.MinMtu;
@@ -166,14 +214,26 @@ namespace Nexum.Core
                 _probeInFlight = false;
                 _discoveryComplete = false;
             }
+            finally
+            {
+                if (lockTaken)
+                    _spinLock.Exit(false);
+            }
         }
 
         internal void SetMtu(int mtu)
         {
-            lock (_lock)
+            bool lockTaken = false;
+            try
             {
+                _spinLock.Enter(ref lockTaken);
                 _confirmedMtu = Math.Clamp(mtu, MtuConfig.MinMtu, MtuConfig.MaxMtu);
                 _discoveryComplete = true;
+            }
+            finally
+            {
+                if (lockTaken)
+                    _spinLock.Exit(false);
             }
         }
     }

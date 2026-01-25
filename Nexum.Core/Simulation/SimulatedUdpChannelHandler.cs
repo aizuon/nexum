@@ -29,8 +29,6 @@ namespace Nexum.Core.Simulation
         private readonly ConcurrentDictionary<IPEndPoint, int> _symmetricPortMappings =
             new ConcurrentDictionary<IPEndPoint, int>();
 
-        private readonly object _syncLock = new object();
-
         private long _bytesSentThisSecond;
 
         private bool _inBurstLoss;
@@ -42,6 +40,8 @@ namespace Nexum.Core.Simulation
 
         private long _packetsReceived;
         private long _packetsSent;
+
+        private SpinLock _spinLock = new SpinLock(false);
 
         public SimulatedUdpChannelHandler(NetworkProfile profile)
         {
@@ -292,8 +292,11 @@ namespace Nexum.Core.Simulation
 
         private bool ShouldDropPacket()
         {
-            lock (_syncLock)
+            bool lockTaken = false;
+            try
             {
+                _spinLock.Enter(ref lockTaken);
+
                 if (_profile.BurstLossStartProbability > 0 || _profile.BurstLossContinueProbability > 0)
                 {
                     if (_inBurstLoss)
@@ -311,6 +314,11 @@ namespace Nexum.Core.Simulation
                 }
 
                 return _random.NextDouble() < _profile.PacketLossRate;
+            }
+            finally
+            {
+                if (lockTaken)
+                    _spinLock.Exit(false);
             }
         }
 
@@ -338,8 +346,11 @@ namespace Nexum.Core.Simulation
 
         private bool TryConsumeBandwidth(int bytes)
         {
-            lock (_syncLock)
+            bool lockTaken = false;
+            try
             {
+                _spinLock.Enter(ref lockTaken);
+
                 double currentTime = _stopwatch.Elapsed.TotalSeconds;
 
                 if (currentTime - _lastBandwidthResetTime >= 1.0)
@@ -353,6 +364,11 @@ namespace Nexum.Core.Simulation
 
                 _bytesSentThisSecond += bytes;
                 return true;
+            }
+            finally
+            {
+                if (lockTaken)
+                    _spinLock.Exit(false);
             }
         }
 

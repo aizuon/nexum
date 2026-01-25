@@ -44,6 +44,8 @@ namespace Nexum.Server
 
         private ConnectionState _connectionState = ConnectionState.Disconnected;
 
+        private EventLoopScheduler _reliableUdpScheduler;
+
         internal volatile bool IsDisposed;
 
         internal NetSession(NetServer server, uint hostId, IChannel channel)
@@ -86,10 +88,6 @@ namespace Nexum.Server
         public bool IsConnected => Channel != null && Channel.Open && Channel.Active;
 
         public ILogger Logger { get; }
-
-        internal object RecvLock { get; } = new object();
-
-        internal object SendLock { get; } = new object();
 
         internal object UdpHolepunchLock { get; } = new object();
 
@@ -161,6 +159,9 @@ namespace Nexum.Server
             Logger.Debug("Session disposed for hostId = {HostId}", HostId);
             P2PGroup?.Leave(this);
 
+            _reliableUdpScheduler?.Stop();
+            _reliableUdpScheduler = null;
+
             if (ToClientReliableUdp != null)
             {
                 ToClientReliableUdp.OnFailed -= OnToClientReliableUdpFailed;
@@ -198,20 +199,17 @@ namespace Nexum.Server
 
         internal void NexumToClient(NetMessage data)
         {
-            lock (SendLock)
-            {
-                if (IsDisposed)
-                    return;
+            if (IsDisposed)
+                return;
 
-                if (data.Compress)
-                    data = NetZip.CompressPacket(data);
-                if (data.Encrypt && Crypt != null)
-                    data = Crypt.CreateEncryptedMessage(data);
+            if (data.Compress)
+                data = NetZip.CompressPacket(data);
+            if (data.Encrypt && Crypt != null)
+                data = Crypt.CreateEncryptedMessage(data);
 
-                var message = new NetMessage();
-                message.Write((ByteArray)data);
-                ToClient(message);
-            }
+            var message = new NetMessage();
+            message.Write((ByteArray)data);
+            ToClient(message);
         }
 
         public void RmiToClientUdpIfAvailable(ushort rmiId, NetMessage message, EncryptMode ecMode = EncryptMode.Fast,
@@ -233,33 +231,30 @@ namespace Nexum.Server
 
         internal void NexumToClientUdpIfAvailable(NetMessage data, bool force = false, bool reliable = false)
         {
-            lock (SendLock)
+            if (IsDisposed)
+                return;
+
+            data.Reliable = reliable;
+            if (data.Compress)
+                data = NetZip.CompressPacket(data);
+            if (data.Encrypt && Crypt != null)
+                data = Crypt.CreateEncryptedMessage(data);
+
+            if (UdpEnabled || force)
             {
-                if (IsDisposed)
-                    return;
-
-                data.Reliable = reliable;
-                if (data.Compress)
-                    data = NetZip.CompressPacket(data);
-                if (data.Encrypt && Crypt != null)
-                    data = Crypt.CreateEncryptedMessage(data);
-
-                if (UdpEnabled || force)
+                if (reliable && ToClientReliableUdp != null)
                 {
-                    if (reliable && ToClientReliableUdp != null)
-                    {
-                        byte[] wrappedData = ReliableUdpHelper.WrapPayload(data.GetBuffer());
-                        ToClientReliableUdp.Send(wrappedData, wrappedData.Length);
-                    }
-                    else
-                    {
-                        ToClientUdp(data);
-                    }
+                    byte[] wrappedData = ReliableUdpHelper.WrapPayload(data.GetBuffer());
+                    ToClientReliableUdp.Send(wrappedData, wrappedData.Length);
                 }
                 else
                 {
-                    NexumToClient(data);
+                    ToClientUdp(data);
                 }
+            }
+            else
+            {
+                NexumToClient(data);
             }
         }
 
@@ -299,10 +294,15 @@ namespace Nexum.Server
             ToClientReliableUdp.OnFailed += OnToClientReliableUdpFailed;
             Logger.Debug("Client reliable UDP initialized with firstFrameNumber = {FirstFrameNumber}",
                 firstFrameNumber);
+
+            StartReliableUdpScheduler();
         }
 
         internal void ResetToClientReliableUdp()
         {
+            _reliableUdpScheduler?.Stop();
+            _reliableUdpScheduler = null;
+
             if (ToClientReliableUdp != null)
             {
                 ToClientReliableUdp.OnFailed -= OnToClientReliableUdpFailed;
@@ -323,8 +323,20 @@ namespace Nexum.Server
             ResetToClientReliableUdp();
         }
 
+        internal void StartReliableUdpScheduler()
+        {
+            _reliableUdpScheduler = EventLoopScheduler.StartIfNeeded(
+                _reliableUdpScheduler,
+                TimeSpan.FromMilliseconds(ReliableUdpConfig.FrameMoveInterval * 1000),
+                ReliableUdpFrameMove,
+                Channel?.EventLoop);
+        }
+
         internal void ReliableUdpFrameMove(double elapsedTime)
         {
+            if (IsDisposed)
+                return;
+
             double currentTime = GetAbsoluteTime();
             ToClientReliableUdp?.FrameMove(elapsedTime);
             UdpDefragBoard.PruneStalePackets(currentTime);
@@ -355,11 +367,8 @@ namespace Nexum.Server
 
         private void SendReliableUdpFrameToClient(ReliableUdpFrame frame)
         {
-            lock (SendLock)
-            {
-                var msg = ReliableUdpHelper.BuildFrameMessage(frame);
-                ToClientUdp(msg);
-            }
+            var msg = ReliableUdpHelper.BuildFrameMessage(frame);
+            ToClientUdp(msg);
         }
 
         private void OnToClientReliableUdpFailed()

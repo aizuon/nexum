@@ -4,7 +4,9 @@ namespace Nexum.Core
 {
     internal sealed class ReliableUdpHost
     {
-        private readonly object _lock = new object();
+        private readonly object _receiverLock = new object();
+        private readonly object _senderLock = new object();
+        private volatile bool _failed;
 
         internal ReliableUdpHost(uint firstFrameNumber)
             : this(firstFrameNumber, firstFrameNumber)
@@ -33,15 +35,18 @@ namespace Nexum.Core
 
         internal StreamQueue ReceivedStream => Receiver.ReceivedStream;
         internal uint ExpectedFrameNumber => Receiver.ExpectedFrameNumber;
-        internal bool Failed { get; private set; }
+        internal bool Failed => _failed;
 
         internal event Action OnFailed;
 
         internal void Send(byte[] data, int length)
         {
-            lock (_lock)
+            if (_failed)
+                return;
+
+            lock (_senderLock)
             {
-                if (Failed)
+                if (_failed)
                     return;
 
                 Sender.Send(data, length);
@@ -50,32 +55,51 @@ namespace Nexum.Core
 
         internal void TakeReceivedFrame(ReliableUdpFrame frame)
         {
-            lock (_lock)
-            {
-                if (Failed)
-                    return;
+            if (_failed)
+                return;
 
-                Receiver.ProcessReceivedFrame(frame);
-            }
+            if (frame.Type == ReliableUdpFrameType.Ack)
+                lock (_senderLock)
+                {
+                    if (_failed)
+                        return;
+
+                    Receiver.ProcessReceivedFrame(frame);
+                }
+            else
+                lock (_receiverLock)
+                {
+                    if (_failed)
+                        return;
+
+                    Receiver.ProcessReceivedFrame(frame);
+                }
         }
 
         internal void FrameMove(double elapsedTime)
         {
-            Action failedCallback = null;
+            if (_failed)
+                return;
 
-            lock (_lock)
+            Action failedCallback = null;
+            double currentTime = GetAbsoluteTime();
+
+            lock (_receiverLock)
             {
-                if (Failed)
+                if (!_failed)
+                    Receiver.FrameMove(currentTime, elapsedTime);
+            }
+
+            lock (_senderLock)
+            {
+                if (_failed)
                     return;
 
-                double currentTime = GetAbsoluteTime();
-
-                Receiver.FrameMove(currentTime, elapsedTime);
                 Sender.FrameMove(currentTime, elapsedTime);
 
                 if (Sender.HasFailed(currentTime))
                 {
-                    Failed = true;
+                    _failed = true;
                     failedCallback = OnFailed;
                 }
             }
@@ -85,15 +109,15 @@ namespace Nexum.Core
 
         internal uint YieldFrameNumber()
         {
-            lock (_lock)
-            {
-                return Sender.NextFrameNumber;
-            }
+            return Sender.NextFrameNumber;
         }
 
         internal void FlushSendStream()
         {
-            lock (_lock)
+            if (_failed)
+                return;
+
+            lock (_senderLock)
             {
                 Sender.StreamToSenderWindowOnNeed(true);
             }
@@ -101,10 +125,7 @@ namespace Nexum.Core
 
         internal void Reset(uint firstFrameNumber)
         {
-            lock (_lock)
-            {
-                Failed = false;
-            }
+            _failed = false;
         }
 
         internal void SendFrameToUdp(ReliableUdpFrame frame)
@@ -114,18 +135,15 @@ namespace Nexum.Core
 
         internal ReliableUdpStats GetStats()
         {
-            lock (_lock)
+            return new ReliableUdpStats
             {
-                return new ReliableUdpStats
-                {
-                    ReceivedStreamCount = Receiver.ReceivedStream.Length,
-                    ExpectedFrameNumber = Receiver.ExpectedFrameNumber,
-                    RecentReceiveSpeed = Receiver.RecentReceiveSpeed,
-                    SendStreamCount = Sender.SendStreamLength,
-                    PendingFrameCount = Sender.PendingFrameCount,
-                    Failed = Failed
-                };
-            }
+                ReceivedStreamCount = Receiver.ReceivedStream.Length,
+                ExpectedFrameNumber = Receiver.ExpectedFrameNumber,
+                RecentReceiveSpeed = Receiver.RecentReceiveSpeed,
+                SendStreamCount = Sender.SendStreamLength,
+                PendingFrameCount = Sender.PendingFrameCount,
+                Failed = _failed
+            };
         }
     }
 

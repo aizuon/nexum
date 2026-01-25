@@ -1,9 +1,11 @@
 using System.Collections.Generic;
+using System.Threading;
 
 namespace Nexum.Core
 {
     internal sealed class DefraggingPacket
     {
+        internal SpinLock Lock = new SpinLock(false);
         internal byte[] AssembledData { get; set; }
         internal bool[] FragmentReceivedFlags { get; set; }
         internal int FragmentsReceivedCount { get; set; }

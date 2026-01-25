@@ -14,21 +14,18 @@ namespace Nexum.Client
             IPEndPoint udpEndPoint = null,
             bool bypass = false)
         {
-            lock (client.RecvLock)
+            if (bypass)
             {
-                if (bypass)
-                {
-                    ReadMessage(client, message, filterTag, udpEndPoint);
-                    return;
-                }
-
-                var packet = new ByteArray();
-                if (!message.Read(ref packet))
-                    return;
-
-                var innerMessage = new NetMessage(packet) { RelayFrom = message.RelayFrom };
-                ReadMessage(client, innerMessage, filterTag, udpEndPoint);
+                ReadMessage(client, message, filterTag, udpEndPoint);
+                return;
             }
+
+            var packet = new ByteArray();
+            if (!message.Read(ref packet))
+                return;
+
+            var innerMessage = new NetMessage(packet) { RelayFrom = message.RelayFrom };
+            ReadMessage(client, innerMessage, filterTag, udpEndPoint);
         }
 
         internal static void ReadMessage(NetClient client, NetMessage message, ushort filterTag = 0,
@@ -351,9 +348,7 @@ namespace Nexum.Client
 
             client.InitializeToServerReliableUdp(client.P2PFirstFrameNumber);
             client.StartReliableUdpLoop();
-
-            if (client.UnreliablePingLoop == null || !client.UnreliablePingLoop.IsRunning)
-                client.StartUnreliablePingLoop();
+            client.StartUnreliablePingLoop();
 
             client.Logger.Debug("UDP connection established with server, guid = {MagicNumber}", magicNumber);
             client.OnUdpConnected();
@@ -1115,6 +1110,8 @@ namespace Nexum.Client
                                 if (p2pMember.ToPeerReliableUdp == null)
                                     p2pMember.ReinitializeReliableUdp();
 
+                                p2pMember.StartReliableUdpScheduler();
+
                                 client.Logger.Debug(
                                     "P2PRecycleComplete => recycled=true, Direct P2P restored for hostId = {HostId}, internalAddr = {InternalAddr}, externalAddr = {ExternalAddr}, sendAddr = {SendAddr}, recvAddr = {RecvAddr}",
                                     hostId, internalAddr, externalAddr, sendAddr, recvAddr);
@@ -1350,6 +1347,8 @@ namespace Nexum.Client
 
                             if (p2pMember.ToPeerReliableUdp == null)
                                 p2pMember.ReinitializeReliableUdp();
+
+                            p2pMember.StartReliableUdpScheduler();
                         }
 
                         client.Logger.Debug(
@@ -1606,11 +1605,8 @@ namespace Nexum.Client
                 ?.UpdateLoggerContext($"{client.ServerName}ClientAdapter({hostId})");
             client.SetConnectionState(ConnectionState.Connected);
 
-            if (!client.ReliablePingLoopRunning)
-            {
-                double reliablePingInterval = (client.NetSettings?.IdleTimeout ?? NetConfig.NoPingTimeoutTime) * 0.3;
-                client.StartReliablePingLoop(reliablePingInterval);
-            }
+            double reliablePingInterval = (client.NetSettings?.IdleTimeout ?? NetConfig.NoPingTimeoutTime) * 0.3;
+            client.StartReliablePingLoop(reliablePingInterval);
 
             client.OnConnected();
         }

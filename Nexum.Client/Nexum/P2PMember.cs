@@ -23,6 +23,7 @@ namespace Nexum.Client
 
         private double _nextPingTime;
         private double _nextTimeSyncTime;
+        private EventLoopScheduler _reliableUdpScheduler;
 
         internal bool EnableDirectP2P = true;
 
@@ -261,6 +262,15 @@ namespace Nexum.Client
             Logger.Debug("Reinitialized reliable UDP for peer {HostId}", HostId);
         }
 
+        internal void StartReliableUdpScheduler()
+        {
+            _reliableUdpScheduler = EventLoopScheduler.StartIfNeeded(
+                _reliableUdpScheduler,
+                TimeSpan.FromMilliseconds(ReliableUdpConfig.FrameMoveInterval * 1000),
+                ReliableUdpFrameMove,
+                PeerUdpChannel?.EventLoop);
+        }
+
         internal void HandleRemoteDisconnect()
         {
             Logger.Debug("Remote peer {HostId} disconnected, falling back to relay", HostId);
@@ -272,8 +282,11 @@ namespace Nexum.Client
             ToPeerReliableUdp?.TakeReceivedFrame(frame);
         }
 
-        internal void FrameMove(double elapsedTime)
+        internal void ReliableUdpFrameMove(double elapsedTime)
         {
+            if (IsClosed)
+                return;
+
             double currentTime = Owner.GetAbsoluteTime();
             ToPeerReliableUdp?.FrameMove(elapsedTime);
             UdpDefragBoard.PruneStalePackets(currentTime);
@@ -317,10 +330,7 @@ namespace Nexum.Client
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal void NexumToPeer(NetMessage data, IPEndPoint endPoint = null)
         {
-            lock (Owner.SendLock)
-            {
-                ToPeer(data, endPoint);
-            }
+            ToPeer(data, endPoint);
         }
 
         internal void Close()
@@ -343,6 +353,9 @@ namespace Nexum.Client
             P2PHolepunchStarted = false;
             JitDirectP2PTriggerSent = false;
             LastUdpReceivedTime = 0;
+
+            _reliableUdpScheduler?.Stop();
+            _reliableUdpScheduler = null;
 
             if (ToPeerReliableUdp != null)
             {
