@@ -52,14 +52,13 @@ A high-performance networking library for .NET 10 designed for real-time multipl
 Nexum/
 ├── BaseLib/                        # Core utilities and extensions
 │   ├── Extensions/
-│   │   ├── BinaryReaderExtensions.cs
-│   │   ├── BinaryWriterExtensions.cs
 │   │   ├── ByteArrayExtensions.cs
 │   │   ├── ConcurrentDictionaryExtensions.cs
 │   │   ├── DateTimeExtensions.cs
 │   │   ├── DictionaryExtensions.cs
 │   │   ├── ExceptionExtensions.cs
 │   │   ├── IPEndPointExtensions.cs
+│   │   ├── SemaphoreSlimExtensions.cs
 │   │   ├── StreamExtensions.cs
 │   │   └── SymmetricAlgorithmExtensions.cs
 │   ├── ContextEnricher.cs
@@ -90,6 +89,7 @@ Nexum/
 │   │   ├── Constants.cs
 │   │   ├── DefraggingPacket.cs
 │   │   ├── Enums.cs
+│   │   ├── EventLoopScheduler.cs
 │   │   ├── Extensions.cs
 │   │   ├── FilterTag.cs
 │   │   ├── FragHeader.cs
@@ -132,6 +132,7 @@ Nexum/
 │       ├── NetUtil.cs
 │       ├── P2PGroup.cs
 │       ├── P2PMember.cs
+│       ├── RecycledUdpSocket.cs
 │       ├── SysUtil.cs
 │       └── UdpHandler.cs
 ├── Nexum.Server/                   # Server-side implementation
@@ -159,10 +160,12 @@ Nexum/
 │   │   ├── MtuDiscoveryTests.cs
 │   │   ├── P2PConnectionTests.cs
 │   │   ├── ReliableUdpTests.cs
+│   │   ├── StressTests.cs
 │   │   ├── UdpConnectionTests.cs
 │   │   ├── UdpFragmentationTests.cs
 │   │   └── UdpReconnectionTests.cs
 │   ├── ByteArrayTests.cs
+│   ├── CRC32Tests.cs
 │   ├── NetCryptTests.cs
 │   ├── NetMessageTests.cs
 │   └── NetZipTests.cs
