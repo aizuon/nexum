@@ -85,8 +85,9 @@ namespace Nexum.Server
 
                     session2.UdpSessionInitialized = true;
                     session2.UdpEndPointInternal = message.EndPoint;
-                    Owner.UdpSessions.TryAdd(FilterTag.Create(session2.HostId, (uint)HostId.Server), session2);
                 }
+
+                Owner.UdpSessions.TryAdd(FilterTag.Create(session2.HostId, (uint)HostId.Server), session2);
 
                 session2.Logger.Debug("UDP holepunch successful, endpoint = {UdpEndPoint}",
                     session2.UdpEndPoint);

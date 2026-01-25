@@ -93,26 +93,26 @@ namespace Nexum.Core.DotNetty.Codecs
                 throw new CorruptedFrameException("negative pre-adjustment length field: " + unadjustedFrameLength);
             }
 
-            long num1 = unadjustedFrameLength + (LengthAdjustment + LengthFieldEndOffset);
-            if (num1 < LengthFieldEndOffset)
+            long frameLength = unadjustedFrameLength + (LengthAdjustment + LengthFieldEndOffset);
+            if (frameLength < LengthFieldEndOffset)
             {
                 input.SkipBytes(LengthFieldEndOffset);
-                throw new CorruptedFrameException("Adjusted frame length (" + num1 +
+                throw new CorruptedFrameException("Adjusted frame length (" + frameLength +
                                                   ") is less than lengthFieldEndOffset: " + LengthFieldEndOffset);
             }
 
-            if (num1 > MaxFrameLength)
+            if (frameLength > MaxFrameLength)
             {
-                long num2 = num1 - input.ReadableBytes;
-                TooLongFrameLength = num1;
-                if (num2 < 0L)
+                long bytesToDiscard = frameLength - input.ReadableBytes;
+                TooLongFrameLength = frameLength;
+                if (bytesToDiscard < 0L)
                 {
-                    input.SkipBytes((int)num1);
+                    input.SkipBytes((int)frameLength);
                 }
                 else
                 {
                     DiscardingTooLongFrame = true;
-                    BytesToDiscard = num2;
+                    BytesToDiscard = bytesToDiscard;
                     input.SkipBytes(input.ReadableBytes);
                 }
 
@@ -120,19 +120,18 @@ namespace Nexum.Core.DotNetty.Codecs
                 return null;
             }
 
-            int length1 = (int)num1;
-            if (input.ReadableBytes < length1)
+            if (input.ReadableBytes < frameLength)
                 return null;
-            if (InitialBytesToStrip > length1)
+            if (InitialBytesToStrip > frameLength)
             {
-                input.SkipBytes(length1);
-                throw new CorruptedFrameException("Adjusted frame length (" + num1 +
+                input.SkipBytes((int)frameLength);
+                throw new CorruptedFrameException("Adjusted frame length (" + frameLength +
                                                   ") is less than initialBytesToStrip: " + InitialBytesToStrip);
             }
 
             input.SkipBytes(InitialBytesToStrip);
             int readerIndex = input.ReaderIndex;
-            int length2 = length1 - InitialBytesToStrip;
+            int length2 = (int)frameLength - InitialBytesToStrip;
             var frame = ExtractFrame(context, input, readerIndex, length2);
             input.SetReaderIndex(readerIndex + length2);
             return frame;

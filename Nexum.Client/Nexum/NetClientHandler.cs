@@ -2,6 +2,7 @@ using System;
 using System.Net;
 using System.Security.Cryptography;
 using System.Threading.Tasks;
+using BaseLib.Extensions;
 using Nexum.Core;
 using Org.BouncyCastle.Asn1;
 
@@ -348,16 +349,17 @@ namespace Nexum.Client
                 client.UdpMagicNumber = magicNumber;
                 client.UdpEnabled = true;
                 client.ServerUdpLastReceivedTime = client.GetAbsoluteTime();
-
-                client.InitializeToServerReliableUdp(client.P2PFirstFrameNumber);
-                client.StartReliableUdpLoop();
-
-                if (client.UnreliablePingLoop == null || !client.UnreliablePingLoop.IsRunning)
-                    client.StartUnreliablePingLoop();
             }
+
+            client.InitializeToServerReliableUdp(client.P2PFirstFrameNumber);
+            client.StartReliableUdpLoop();
+
+            if (client.UnreliablePingLoop == null || !client.UnreliablePingLoop.IsRunning)
+                client.StartUnreliablePingLoop();
 
             client.Logger.Debug("UDP connection established with server, guid = {MagicNumber}", magicNumber);
             client.OnUdpConnected();
+
             ProcessPendingP2PConnections(client);
         }
 
@@ -379,7 +381,7 @@ namespace Nexum.Client
                 if (!client.P2PGroup.P2PMembersInternal.TryGetValue(hostId, out var p2pMember))
                     continue;
 
-                lock (p2pMember.P2PMutex)
+                using (p2pMember.P2PMutex.Enter())
                 {
                     if (p2pMember.P2PHolepunchInitiated)
                         continue;
@@ -444,9 +446,9 @@ namespace Nexum.Client
                 return;
             }
 
-            Task.Run(() =>
+            Task.Run(async () =>
             {
-                lock (p2pMember.P2PMutex)
+                await using (await p2pMember.P2PMutex.EnterAsync())
                 {
                     if (p2pMember.IsClosed)
                         return;
@@ -461,7 +463,7 @@ namespace Nexum.Client
                     else
                     {
                         (var channel, int newPort, _) =
-                            client.ConnectUdp();
+                            await client.ConnectUdpAsync();
                         p2pMember.PeerUdpChannel = channel;
                         port = newPort;
                     }
@@ -506,7 +508,7 @@ namespace Nexum.Client
                 return;
             }
 
-            lock (p2pMember.P2PMutex)
+            using (p2pMember.P2PMutex.Enter())
             {
                 if (!magicNumber.Equals(client.PeerUdpMagicNumber))
                 {
@@ -551,7 +553,7 @@ namespace Nexum.Client
                 IPEndPoint peerUdpLocalSocket;
                 IPEndPoint selfUdpSocketLocal;
 
-                lock (capturedMember.P2PMutex)
+                using (capturedMember.P2PMutex.Enter())
                 {
                     if (capturedMember.IsClosed || capturedMember.DirectP2P)
                         return;
@@ -638,7 +640,7 @@ namespace Nexum.Client
                 return;
             }
 
-            lock (p2pMember.P2PMutex)
+            using (p2pMember.P2PMutex.Enter())
             {
                 if (!magicNumber.Equals(p2pMember.PeerUdpMagicNumber))
                 {
@@ -856,11 +858,11 @@ namespace Nexum.Client
                 }
                 else
                 {
-                    Task.Run(() =>
+                    Task.Run(async () =>
                     {
-                        try
+                        await using (await newMember.P2PMutex.EnterAsync())
                         {
-                            lock (newMember.P2PMutex)
+                            try
                             {
                                 int? targetPort = bindPort > 0 ? bindPort : null;
                                 bool localPortReuseSuccess = false;
@@ -877,7 +879,7 @@ namespace Nexum.Client
                                 }
 
                                 (var channel, int port, _) =
-                                    client.ConnectUdp(targetPort);
+                                    await client.ConnectUdpAsync(targetPort);
                                 newMember.PeerUdpChannel = channel;
                                 newMember.SelfUdpLocalSocket = new IPEndPoint(client.LocalIP, port);
 
@@ -898,12 +900,12 @@ namespace Nexum.Client
                                 joinAck.Write(localPortReuseSuccess);
                                 client.RmiToServer((ushort)NexumOpCode.P2PGroup_MemberJoin_Ack, joinAck);
                             }
-                        }
-                        catch (Exception ex)
-                        {
-                            client.Logger.Error(ex,
-                                "ProcessP2PGroupMemberJoin => failed to create P2P UDP socket for hostId = {HostId}",
-                                hostId);
+                            catch (Exception ex)
+                            {
+                                client.Logger.Error(ex,
+                                    "ProcessP2PGroupMemberJoin => failed to create P2P UDP socket for hostId = {HostId}",
+                                    hostId);
+                            }
                         }
                     });
                 }
@@ -1003,7 +1005,7 @@ namespace Nexum.Client
 
                     client.ServerUdpSocket = actualUdpEndpoint;
 
-                    Task.Run(() =>
+                    Task.Run(async () =>
                     {
                         try
                         {
@@ -1017,9 +1019,8 @@ namespace Nexum.Client
                                 return;
                             }
 
-                            var (channel, _, _) = client.ConnectUdp();
+                            var (channel, _, _) = await client.ConnectUdpAsync();
                             client.UdpChannel = channel;
-                            client.ServerUdpReadyWaiting = false;
 
                             var newSocketAck = new NetMessage();
                             newSocketAck.Write(true);
@@ -1029,8 +1030,6 @@ namespace Nexum.Client
                         catch (Exception ex)
                         {
                             client.Logger.Error(ex, "S2C_RequestCreateUdpSocket => failed to create UDP socket");
-                            client.ServerUdpSocketFailed = true;
-                            client.ServerUdpReadyWaiting = false;
                         }
                     });
 
@@ -1040,17 +1039,11 @@ namespace Nexum.Client
                 case NexumOpCode.S2C_CreateUdpSocketAck:
                 {
                     if (!message.Read(out bool result) || !result)
-                    {
-                        client.ServerUdpReadyWaiting = false;
                         return;
-                    }
 
                     var udpSocket = new IPEndPoint(IPAddress.Loopback, IPEndPoint.MinPort);
                     if (!message.ReadStringEndPoint(ref udpSocket))
-                    {
-                        client.ServerUdpReadyWaiting = false;
                         return;
-                    }
 
                     var serverTcpAddress = ((IPEndPoint)client.Channel.RemoteAddress).Address;
                     var actualUdpEndpoint = new IPEndPoint(serverTcpAddress, udpSocket.Port);
@@ -1061,25 +1054,20 @@ namespace Nexum.Client
 
                     client.ServerUdpSocket = actualUdpEndpoint;
 
-                    Task.Run(() =>
+                    Task.Run(async () =>
                     {
-                        if (client.UdpChannel == null && !client.ServerUdpSocketFailed)
+                        if (client.UdpChannel == null)
                             try
                             {
-                                var (channel, _, _) = client.ConnectUdp();
+                                var (channel, _, _) = await client.ConnectUdpAsync();
                                 client.UdpChannel = channel;
-                                client.ServerUdpReadyWaiting = false;
 
                                 client.Logger.Debug("S2C_CreateUdpSocketAck => UDP socket created");
                             }
                             catch (Exception ex)
                             {
                                 client.Logger.Error(ex, "S2C_CreateUdpSocketAck => failed to create UDP socket");
-                                client.ServerUdpSocketFailed = true;
-                                client.ServerUdpReadyWaiting = false;
                             }
-                        else
-                            client.ServerUdpReadyWaiting = false;
                     });
 
                     break;
@@ -1110,9 +1098,9 @@ namespace Nexum.Client
                             break;
                         }
 
-                        Task.Run(() =>
+                        Task.Run(async () =>
                         {
-                            lock (p2pMember.P2PMutex)
+                            await using (await p2pMember.P2PMutex.EnterAsync())
                             {
                                 if (p2pMember.IsClosed)
                                     return;
@@ -1124,7 +1112,7 @@ namespace Nexum.Client
                                         targetPort = p2pMember.PeerBindPort;
 
                                     (var channel, int port, bool portReuseSuccess) =
-                                        client.ConnectUdp(targetPort);
+                                        await client.ConnectUdpAsync(targetPort);
                                     p2pMember.PeerUdpChannel = channel;
                                     p2pMember.SelfUdpLocalSocket = new IPEndPoint(client.LocalIP, port);
                                     p2pMember.LocalPortReuseSuccess = portReuseSuccess;
@@ -1206,7 +1194,7 @@ namespace Nexum.Client
 
                     client.Logger.Debug("NewDirectP2PConnection => hostId = {HostId}", hostId);
 
-                    lock (targetMember.P2PMutex)
+                    using (targetMember.P2PMutex.Enter())
                     {
                         if (targetMember.P2PHolepunchInitiated)
                         {
@@ -1260,7 +1248,7 @@ namespace Nexum.Client
 
                     Guid capturedPeerMagicNumber;
 
-                    lock (p2pMember.P2PMutex)
+                    using (p2pMember.P2PMutex.Enter())
                     {
                         if (p2pMember.P2PHolepunchStarted || p2pMember.DirectP2P)
                         {
@@ -1369,7 +1357,7 @@ namespace Nexum.Client
 
                     if (client.P2PGroup.P2PMembersInternal.TryGetValue(hostIdB, out var p2pMember))
                     {
-                        lock (p2pMember.P2PMutex)
+                        using (p2pMember.P2PMutex.Enter())
                         {
                             if (p2pMember.DirectP2P)
                             {
@@ -1419,9 +1407,9 @@ namespace Nexum.Client
                     {
                         client.Logger.Debug("RenewP2PConnectionState => hostId = {HostId}", hostId);
 
-                        Task.Run(() =>
+                        Task.Run(async () =>
                         {
-                            lock (p2pMember.P2PMutex)
+                            await using (await p2pMember.P2PMutex.EnterAsync())
                             {
                                 p2pMember.Close(p2pMember.DirectP2P);
                                 p2pMember.IsClosed = false;
@@ -1429,7 +1417,7 @@ namespace Nexum.Client
                                 if (p2pMember.PeerUdpChannel == null)
                                 {
                                     (var channel, int port, _) =
-                                        client.ConnectUdp();
+                                        await client.ConnectUdpAsync();
                                     p2pMember.PeerUdpChannel = channel;
                                     client.Logger.Debug(
                                         "RenewP2PConnectionState => pre-created P2P UDP socket on port {Port}", port);
@@ -1468,7 +1456,7 @@ namespace Nexum.Client
                             "HolsterP2PHolepunchTrial => peer {HostId} requested to stop holepunch trial",
                             p2pMember.HostId);
 
-                        lock (p2pMember.P2PMutex)
+                        using (p2pMember.P2PMutex.Enter())
                         {
                             p2pMember.P2PHolepunchStarted = false;
                             p2pMember.P2PHolepunchInitiated = false;

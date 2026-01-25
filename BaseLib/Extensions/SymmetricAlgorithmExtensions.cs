@@ -46,7 +46,7 @@ namespace BaseLib.Extensions
                 {
                     await using (var cs = new CryptoStream(stream, encryptor, CryptoStreamMode.Write))
                     {
-                        await cs.WriteAsync(buffer, 0, buffer.Length);
+                        await cs.WriteAsync(buffer, 0, buffer.Length).ConfigureAwait(false);
                         cs.Close();
                         return stream.ToArray();
                     }
@@ -62,8 +62,8 @@ namespace BaseLib.Extensions
                 {
                     await using (var cs = new CryptoStream(ms, transform, CryptoStreamMode.Write))
                     {
-                        await buffer.CopyToAsync(cs);
-                        await cs.FlushAsync();
+                        await buffer.CopyToAsync(cs).ConfigureAwait(false);
+                        await cs.FlushAsync().ConfigureAwait(false);
                         return ms.ToArray();
                     }
                 }
@@ -103,7 +103,7 @@ namespace BaseLib.Extensions
                 {
                     await using (var cs = new CryptoStream(stream, decryptor, CryptoStreamMode.Read))
                     {
-                        return await cs.ReadToEndAsync();
+                        return await cs.ReadToEndAsync().ConfigureAwait(false);
                     }
                 }
             }
@@ -115,7 +115,7 @@ namespace BaseLib.Extensions
             {
                 await using (var cs = new CryptoStream(buffer, transform, CryptoStreamMode.Read))
                 {
-                    return await cs.ReadToEndAsync();
+                    return await cs.ReadToEndAsync().ConfigureAwait(false);
                 }
             }
         }

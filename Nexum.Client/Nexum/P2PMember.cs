@@ -1,7 +1,9 @@
 using System;
 using System.Net;
 using System.Runtime.CompilerServices;
+using System.Threading;
 using System.Threading.Tasks;
+using BaseLib.Extensions;
 using DotNetty.Transport.Channels;
 using Nexum.Core;
 using Serilog;
@@ -14,6 +16,8 @@ namespace Nexum.Client
         internal readonly ILogger Logger;
         internal readonly MtuDiscovery MtuDiscovery = new MtuDiscovery();
         internal readonly NetClient Owner;
+
+        public readonly SemaphoreSlim P2PMutex = new SemaphoreSlim(1, 1);
         internal readonly UdpPacketDefragBoard UdpDefragBoard = new UdpPacketDefragBoard();
         internal readonly UdpPacketFragBoard UdpFragBoard = new UdpPacketFragBoard();
 
@@ -37,8 +41,6 @@ namespace Nexum.Client
         internal bool P2PHolepunchInitiated;
         internal bool P2PHolepunchNotified;
         internal bool P2PHolepunchStarted;
-
-        internal object P2PMutex = new object();
 
         internal int PeerBindPort;
 
@@ -195,9 +197,9 @@ namespace Nexum.Client
             if (Owner.NetSettings.DirectP2PStartCondition != DirectP2PStartCondition.Jit)
                 return;
 
-            Task.Run(() =>
+            Task.Run(async () =>
             {
-                lock (P2PMutex)
+                await using (await P2PMutex.EnterAsync())
                 {
                     if (IsClosed || DirectP2P)
                         return;
@@ -208,7 +210,7 @@ namespace Nexum.Client
                     if (PeerUdpChannel == null && SelfUdpLocalSocket != null)
                     {
                         int? targetPort = SelfUdpLocalSocket.Port;
-                        (var channel, int port, _) = Owner.ConnectUdp(targetPort);
+                        (var channel, int port, _) = await Owner.ConnectUdpAsync(targetPort);
                         PeerUdpChannel = channel;
                         SelfUdpLocalSocket = new IPEndPoint(Owner.LocalIP, port);
                     }
@@ -352,13 +354,13 @@ namespace Nexum.Client
             {
                 Logger.Debug("Recycling P2P UDP socket on port {Port} for hostId = {HostId}", localPort, HostId);
                 Owner.RecycleUdpSocket(PeerUdpChannel, localPort);
-                PeerUdpChannel = null;
             }
             else
             {
                 PeerUdpChannel?.CloseAsync();
-                PeerUdpChannel = null;
             }
+
+            PeerUdpChannel = null;
 
             PeerLocalToRemoteSocket = null;
             PeerRemoteToLocalSocket = null;
@@ -390,7 +392,7 @@ namespace Nexum.Client
 
         private void FallbackP2PToRelay(bool firstChance = true)
         {
-            lock (P2PMutex)
+            using (P2PMutex.Enter())
             {
                 if (!DirectP2P)
                     return;

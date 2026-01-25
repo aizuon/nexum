@@ -150,15 +150,15 @@ namespace Nexum.Core
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool ReadIPEndPoint(ref IPEndPoint b)
         {
-            uint num1 = 0;
-            if (!Read(ref num1))
+            uint address = 0;
+            if (!Read(ref address))
                 return false;
-            ushort num2 = 0;
-            if (!Read(ref num2))
+            ushort port = 0;
+            if (!Read(ref port))
                 return false;
             Span<byte> addressBytes = stackalloc byte[4];
-            BinaryPrimitives.WriteUInt32LittleEndian(addressBytes, num1);
-            b = new IPEndPoint(new IPAddress(addressBytes), num2);
+            BinaryPrimitives.WriteUInt32LittleEndian(addressBytes, address);
+            b = new IPEndPoint(new IPAddress(addressBytes), port);
             return true;
         }
 
@@ -177,32 +177,32 @@ namespace Nexum.Core
         public bool Read(ref string obj, out bool isUnicode)
         {
             isUnicode = false;
-            byte num1 = 0;
-            long num2 = 0;
-            if (!Read(ref num1) || !ReadScalar(ref num2))
+            byte unicodeFlag = 0;
+            long length = 0;
+            if (!Read(ref unicodeFlag) || !ReadScalar(ref length))
                 return false;
-            if (num2 == 0L)
+            if (length == 0L)
             {
                 obj = string.Empty;
                 return true;
             }
 
-            if (num1 == 2)
+            if (unicodeFlag == 2)
             {
-                num2 = 2L * num2;
-                if (ReadOffset + num2 > Length)
+                length = 2L * length;
+                if (ReadOffset + length > Length)
                     return false;
-                obj = Encoding.Unicode.GetString(GetBufferSpan().Slice(ReadOffset, (int)num2));
+                obj = Encoding.Unicode.GetString(GetBufferSpan().Slice(ReadOffset, (int)length));
                 isUnicode = true;
             }
             else
             {
-                if (ReadOffset + num2 > Length)
+                if (ReadOffset + length > Length)
                     return false;
-                obj = Latin1Encoding.GetString(GetBufferSpan().Slice(ReadOffset, (int)num2));
+                obj = Latin1Encoding.GetString(GetBufferSpan().Slice(ReadOffset, (int)length));
             }
 
-            ReadOffset += (int)num2;
+            ReadOffset += (int)length;
             return true;
         }
 
@@ -265,14 +265,14 @@ namespace Nexum.Core
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool Read(out float obj)
         {
-            obj = 0UL;
+            obj = 0f;
             return Read(ref obj);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool Read(out double obj)
         {
-            obj = 0UL;
+            obj = 0.0;
             return Read(ref obj);
         }
 

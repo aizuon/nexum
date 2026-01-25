@@ -6,7 +6,6 @@ using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Runtime.CompilerServices;
-using System.Threading;
 using System.Threading.Tasks;
 using BaseLib;
 using BaseLib.Extensions;
@@ -64,8 +63,8 @@ namespace Nexum.Client
 
         internal readonly object RecvLock = new object();
 
-        internal readonly ConcurrentDictionary<ushort, RecycledUdpSocket> RecycledSockets =
-            new ConcurrentDictionary<ushort, RecycledUdpSocket>();
+        internal readonly ConcurrentDictionary<int, RecycledUdpSocket> RecycledSockets =
+            new ConcurrentDictionary<int, RecycledUdpSocket>();
 
         internal readonly object SendLock = new object();
 
@@ -79,7 +78,7 @@ namespace Nexum.Client
 
         private bool _recycleGarbageCollectLoopRunning;
 
-        internal ushort AimForPort = NetConfig.UdpAimForPort;
+        internal int AimForPort = NetConfig.UdpAimForPort;
 
         internal NetCrypt Crypt;
 
@@ -113,10 +112,9 @@ namespace Nexum.Client
         internal double ServerUdpJitter;
         internal double ServerUdpLastPing;
         internal double ServerUdpLastReceivedTime;
-        internal bool ServerUdpReadyWaiting;
         internal double ServerUdpRecentPing;
+        internal bool ServerUdpRequested;
         internal IPEndPoint ServerUdpSocket;
-        internal bool ServerUdpSocketFailed;
 
         internal ReliableUdpHost ToServerReliableUdp;
 
@@ -244,7 +242,7 @@ namespace Nexum.Client
                 .ConnectAsync(ipEndPoint);
 
             var timeoutTask = Task.Delay(TimeSpan.FromSeconds(NetConfig.TcpSocketConnectTimeout));
-            var completedTask = await Task.WhenAny(connectTask, timeoutTask);
+            var completedTask = await Task.WhenAny(connectTask, timeoutTask).ConfigureAwait(false);
 
             if (completedTask == timeoutTask)
             {
@@ -257,7 +255,7 @@ namespace Nexum.Client
                     $"TCP connection to {ipEndPoint.ToIPv4String()} timed out after {NetConfig.TcpSocketConnectTimeout}s");
             }
 
-            Channel = await connectTask;
+            Channel = await connectTask.ConfigureAwait(false);
             Logger.Debug("TCP connection established to {Endpoint}", ipEndPoint.ToIPv4String());
         }
 
@@ -289,7 +287,7 @@ namespace Nexum.Client
                 RmiToServer((ushort)NexumOpCode.ShutdownTcp, shutdownTcp);
 
                 var timeoutTask = Task.Delay(TimeSpan.FromSeconds(NetConfig.GracefulDisconnectTimeout));
-                var completedTask = await Task.WhenAny(tcs.Task, timeoutTask);
+                var completedTask = await Task.WhenAny(tcs.Task, timeoutTask).ConfigureAwait(false);
 
                 if (completedTask == timeoutTask)
                 {
@@ -432,11 +430,10 @@ namespace Nexum.Client
                 OnDisconnected();
         }
 
-        internal (IChannel Channel, int Port, bool PortReuseSuccess)
-            ConnectUdp(
-                int? targetPort = null)
+        internal async Task<(IChannel Channel, int Port, bool PortReuseSuccess)>
+            ConnectUdpAsync(int? targetPort = null)
         {
-            if (targetPort.HasValue && RecycledSockets.TryRemove((ushort)targetPort.Value, out var recycled))
+            if (targetPort.HasValue && RecycledSockets.TryRemove(targetPort.Value, out var recycled))
             {
                 if (recycled.Channel != null && recycled.Channel.Active && !recycled.Garbaged)
                 {
@@ -449,110 +446,85 @@ namespace Nexum.Client
                 GarbageSocket(recycled);
             }
 
-            int aimPort = targetPort ?? AimForPort;
-            const int maxBindAttempts = 128;
-
-            static bool IsUdpBindFailure(Exception ex)
+            bool IsUdpBindFailure(Exception ex)
             {
-                if (ex is ChannelException)
-                    return true;
-                if (ex is SocketException)
+                if (ex is ChannelException || ex is SocketException)
                     return true;
 
                 if (ex is AggregateException agg)
-                    return agg.Flatten().InnerExceptions.Any(IsUdpBindFailure);
+                    return agg.Flatten().InnerExceptions.All(IsUdpBindFailure);
 
                 return ex.InnerException != null && IsUdpBindFailure(ex.InnerException);
             }
 
-            for (int attempt = 0; attempt < maxBindAttempts; attempt++)
+            async Task<IChannel> BindAsync(int port)
             {
-                int port = NetUtil.GetAvailablePort(aimPort);
-                bool portReuseSuccess = targetPort.HasValue && port == targetPort.Value;
-                Logger.Debug("Allocating UDP port {Port}", port);
-                AimForPort = (ushort)(port + 1);
+                return await new Bootstrap()
+                    .Group(_eventLoopGroup)
+                    .Channel<SocketDatagramChannel>()
+                    .Handler(new ActionChannelInitializer<IChannel>(ch =>
+                    {
+                        if (NetworkSimulationProfile != null &&
+                            !NetworkSimulationProfile.IsIdeal)
+                        {
+                            var handler =
+                                new SimulatedUdpChannelHandler(NetworkSimulationProfile);
+                            ch.Pipeline.AddFirst("network-simulation", handler);
+                            NetworkSimulationStats.RegisterHandler(ch, handler);
+                        }
 
-                Mutex bindMutex = null;
-                bool mutexHeld = false;
+                        UdpPipelineConfigurator?.Invoke(ch.Pipeline);
+
+                        ch.Pipeline
+                            .AddLast(new UdpFrameDecoder(NetConfig.MessageMaxLength))
+                            .AddLast(new UdpFrameEncoder())
+                            .AddLast(new UdpHandler(this, port));
+                    }))
+                    .Option(ChannelOption.SoRcvbuf, NetConfig.UdpIssueRecvLength)
+                    .Option(ChannelOption.SoSndbuf, NetConfig.UdpSendBufferLength)
+                    .Option(ChannelOption.Allocator, UnpooledByteBufferAllocator.Default)
+                    .BindAsync(new IPEndPoint(LocalIP, port));
+            }
+
+            if (targetPort.HasValue)
+            {
+                int port = targetPort.Value;
+
                 try
                 {
-                    bindMutex = new Mutex(false, UdpBindPortMutexPrefix + port);
-                    try
-                    {
-                        mutexHeld = bindMutex.WaitOne(0);
-                    }
-                    catch (AbandonedMutexException)
-                    {
-                        mutexHeld = true;
-                    }
+                    var channel = await BindAsync(port);
 
-                    if (!mutexHeld)
-                    {
-                        NetUtil.ReleasePort(port);
-                        aimPort = port + 1;
-                        continue;
-                    }
+                    Logger.Debug("UDP socket bound on target port {Port}", port);
 
-                    var channel = new Bootstrap()
-                        .Group(_eventLoopGroup)
-                        .Channel<SocketDatagramChannel>()
-                        .Handler(new ActionChannelInitializer<IChannel>(ch =>
-                        {
-                            if (NetworkSimulationProfile != null && !NetworkSimulationProfile.IsIdeal)
-                            {
-                                var handler = new SimulatedUdpChannelHandler(NetworkSimulationProfile);
-                                ch.Pipeline.AddFirst("network-simulation", handler);
-                                NetworkSimulationStats.RegisterHandler(ch, handler);
-                            }
-
-                            UdpPipelineConfigurator?.Invoke(ch.Pipeline);
-
-                            ch.Pipeline
-                                .AddLast(new UdpFrameDecoder(NetConfig.MessageMaxLength))
-                                .AddLast(new UdpFrameEncoder())
-                                .AddLast(new UdpHandler(this, port));
-                        }))
-                        .Option(ChannelOption.SoRcvbuf, NetConfig.UdpIssueRecvLength)
-                        .Option(ChannelOption.SoSndbuf, NetConfig.UdpSendBufferLength)
-                        .Option(ChannelOption.Allocator, UnpooledByteBufferAllocator.Default)
-                        .BindAsync(new IPEndPoint(LocalIP, port))
-                        .GetAwaiter().GetResult();
-
-                    Logger.Debug("UDP socket bound on port {Port}", port);
-
-                    _ = channel.CloseCompletion.ContinueWith(_ =>
-                    {
-                        Logger.Debug("UDP socket on port {Port} closed", port);
-                        NetUtil.ReleasePort(port);
-                    });
-
-                    return (channel, port, portReuseSuccess);
+                    return (channel, port, true);
                 }
-                catch (Exception ex)
+                catch (Exception ex) when (IsUdpBindFailure(ex))
                 {
-                    NetUtil.ReleasePort(port);
-                    aimPort = port + 1;
-
-                    if (IsUdpBindFailure(ex))
-                    {
-                        Logger.Debug(ex, "UDP bind failed on port {Port}, retrying", port);
-                        continue;
-                    }
-
-                    Logger.Error(ex, "Unexpected error while binding UDP on port {Port}", port);
-                    throw;
-                }
-                finally
-                {
-                    if (mutexHeld)
-                        bindMutex.ReleaseMutex();
-
-                    bindMutex?.Dispose();
+                    Logger.Debug(
+                        "UDP bind failed on target port {Port}, falling back to OS-assigned port",
+                        port);
                 }
             }
 
-            throw new InvalidOperationException(
-                $"Failed to allocate/bind an available UDP port after {maxBindAttempts} attempts");
+            try
+            {
+                var channel = await BindAsync(0);
+
+                int assignedPort =
+                    ((IPEndPoint)channel.LocalAddress).Port;
+
+                Logger.Debug(
+                    "UDP socket bound on OS-assigned port {Port}",
+                    assignedPort);
+
+                return (channel, assignedPort, false);
+            }
+            catch (Exception ex) when (IsUdpBindFailure(ex))
+            {
+                throw new InvalidOperationException(
+                    "Failed to bind UDP socket using OS-assigned port",
+                    ex);
+            }
         }
 
         internal void RecycleUdpSocket(IChannel channel, int port)
@@ -564,7 +536,7 @@ namespace Nexum.Client
             }
 
             var recycled = new RecycledUdpSocket(channel, port, GetAbsoluteTime());
-            if (RecycledSockets.TryAdd((ushort)port, recycled))
+            if (RecycledSockets.TryAdd(port, recycled))
             {
                 Logger.Debug("Recycled UDP socket on port {Port}", port);
                 StartRecycleGarbageCollectLoopIfNeeded();
@@ -667,6 +639,7 @@ namespace Nexum.Client
             ServerUdpLastPing = 0;
             ServerUdpRecentPing = 0;
             ServerUdpJitter = 0;
+            ServerUdpRequested = false;
 
             if (wasEnabled)
                 OnUdpDisconnected();
@@ -842,10 +815,10 @@ namespace Nexum.Client
 
         internal void RequestServerUdpSocketReady_FirstTimeOnly()
         {
-            if (UdpChannel != null || ServerUdpReadyWaiting || ServerUdpSocketFailed)
+            if (UdpChannel != null || ServerUdpRequested)
                 return;
 
-            ServerUdpReadyWaiting = true;
+            ServerUdpRequested = true;
             RmiToServer((ushort)NexumOpCode.C2S_RequestCreateUdpSocket, new NetMessage());
         }
 

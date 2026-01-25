@@ -358,7 +358,6 @@ namespace Nexum.Server
 
             Guid capturedMagicNumber;
             IPEndPoint capturedUdpEndPoint;
-
             lock (session.UdpHolepunchLock)
             {
                 if (!magicNumber.Equals(session.HolepunchMagicNumber))
@@ -406,7 +405,6 @@ namespace Nexum.Server
                 return;
 
             Guid capturedMagicNumber;
-
             lock (session.UdpHolepunchLock)
             {
                 if (!magicNumber.Equals(session.HolepunchMagicNumber))
@@ -432,13 +430,13 @@ namespace Nexum.Server
                 session.UdpLocalEndPointInternal = localUdpSocket;
 
                 capturedMagicNumber = session.HolepunchMagicNumber;
-
-                if (session.P2PGroup != null &&
-                    session.P2PGroup.P2PMembersInternal.TryGetValue(session.HostId, out var member))
-                    session.InitializeToClientReliableUdp(member.P2PFirstFrameNumber);
-
-                server.StartReliableUdpLoop();
             }
+
+            if (session.P2PGroup != null &&
+                session.P2PGroup.P2PMembersInternal.TryGetValue(session.HostId, out var member))
+                session.InitializeToClientReliableUdp(member.P2PFirstFrameNumber);
+
+            server.StartReliableUdpLoop();
 
             session.NexumToClientUdpIfAvailable(
                 HolepunchHelper.CreateNotifyClientServerUdpMatchedMessage(capturedMagicNumber), true);
@@ -460,18 +458,20 @@ namespace Nexum.Server
                 if (request.SenderSession.IsDisposed)
                     continue;
 
+                IPEndPoint capturedSenderUdpEndpoint;
                 lock (request.SenderSession.UdpHolepunchLock)
                 {
                     if (!request.SenderSession.UdpEnabled)
                         continue;
+
+                    if (request.SenderSession.UdpSocket?.Channel == null)
+                        continue;
+
+                    var senderUdpEndpoint = request.SenderSession.UdpEndPoint;
+                    if (senderUdpEndpoint == null)
+                        continue;
+                    capturedSenderUdpEndpoint = senderUdpEndpoint;
                 }
-
-                if (request.SenderSession.UdpSocket?.Channel == null)
-                    continue;
-
-                var senderUdpEndpoint = request.SenderSession.UdpEndPoint;
-                if (senderUdpEndpoint == null)
-                    continue;
 
                 session.Logger.Debug(
                     "ProcessPendingPeerHolepunchRequests => processing queued request from hostId = {SenderHostId}, magicNumber = {MagicNumber}",
@@ -479,10 +479,12 @@ namespace Nexum.Server
                     request.MagicNumber);
 
                 request.SenderSession.NexumToClient(
-                    HolepunchHelper.CreatePeerUdpServerHolepunchAckMessage(request.MagicNumber, senderUdpEndpoint,
+                    HolepunchHelper.CreatePeerUdpServerHolepunchAckMessage(request.MagicNumber,
+                        capturedSenderUdpEndpoint,
                         session.HostId));
                 HolepunchHelper.SendBurstMessages(
-                    () => HolepunchHelper.CreatePeerUdpServerHolepunchAckMessage(request.MagicNumber, senderUdpEndpoint,
+                    () => HolepunchHelper.CreatePeerUdpServerHolepunchAckMessage(request.MagicNumber,
+                        capturedSenderUdpEndpoint,
                         session.HostId),
                     msg => request.SenderSession.NexumToClient(msg)
                 );
@@ -520,11 +522,6 @@ namespace Nexum.Server
                 }
             }
 
-            session.Logger.Debug(
-                "PeerUdpServerHolepunch => guid = {MagicNumber}, targetHostId = {TargetHostId}",
-                magicNumber,
-                hostId);
-
             lock (targetPeer.Session.UdpHolepunchLock)
             {
                 if (!targetPeer.Session.UdpEnabled)
@@ -538,6 +535,11 @@ namespace Nexum.Server
                     return;
                 }
             }
+
+            session.Logger.Debug(
+                "PeerUdpServerHolepunch => guid = {MagicNumber}, targetHostId = {TargetHostId}",
+                magicNumber,
+                hostId);
 
             session.NexumToClient(
                 HolepunchHelper.CreatePeerUdpServerHolepunchAckMessage(magicNumber, udpEndPoint,

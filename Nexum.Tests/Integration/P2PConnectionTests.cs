@@ -467,7 +467,7 @@ namespace Nexum.Tests.Integration
                     GetAdjustedTimeout(MessageTimeout)),
                 "Client1 should remove client2 from P2P members after leave");
 
-            ushort originalPortKey = (ushort)originalPort;
+            int originalPortKey = originalPort;
 
             Assert.True(await WaitForConditionAsync(
                     () => client1.RecycledSockets.ContainsKey(originalPortKey),
@@ -563,8 +563,8 @@ namespace Nexum.Tests.Integration
                 "Client1 should remove client2 from P2P members after leave");
 
             Assert.True(await WaitForConditionAsync(
-                    () => client1.RecycledSockets.ContainsKey((ushort)peer1Port) &&
-                          client2.RecycledSockets.ContainsKey((ushort)peer2Port),
+                    () => client1.RecycledSockets.ContainsKey(peer1Port) &&
+                          client2.RecycledSockets.ContainsKey(peer2Port),
                     GetAdjustedTimeout(MessageTimeout)),
                 "Both clients should recycle their P2P UDP sockets after leave");
 

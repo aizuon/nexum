@@ -208,7 +208,7 @@ namespace Nexum.Server
                 .ChildOption(ChannelOption.SoSndbuf, NetConfig.TcpSendBufferLength)
                 .ChildOption(ChannelOption.AllowHalfClosure, false)
                 .ChildAttribute(ChannelAttributes.Session, default(NetSession))
-                .BindAsync(endPoint);
+                .BindAsync(endPoint).ConfigureAwait(false);
 
             if (udpListenerPorts != null)
             {
@@ -216,7 +216,7 @@ namespace Nexum.Server
                 {
                     var udpSocket = new UdpSocket(this);
                     await udpSocket.ListenAsync(((IPEndPoint)Channel.LocalAddress).Address.MapToIPv4(), (int)port,
-                        _eventLoopGroup);
+                        _eventLoopGroup).ConfigureAwait(false);
                     UdpSockets.TryAdd(port, udpSocket);
                 }
 

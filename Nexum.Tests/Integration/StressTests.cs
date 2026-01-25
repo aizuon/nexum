@@ -11,18 +11,18 @@ using Xunit.Abstractions;
 namespace Nexum.Tests.Integration
 {
     [Collection("Integration")]
-    public class MultiClientP2PTests : IntegrationTestBase
+    public class StressTests : IntegrationTestBase
     {
-        public MultiClientP2PTests(ITestOutputHelper output) : base(output)
+        public StressTests(ITestOutputHelper output) : base(output)
         {
         }
 
         [Fact(Timeout = 300000)]
-        public async Task MultiClient_P2P_AllClientsCanCommunicate()
+        public async Task StressTest_MultiClient_WholeFlow()
         {
             const int clientCount = 12;
 
-            Output.WriteLine($"[TEST] Starting multi-client P2P test with {clientCount} clients");
+            Output.WriteLine($"[TEST] Starting whole flow stress test with {clientCount} clients");
 
             Server = await CreateServerAsync();
             Output.WriteLine($"[TEST] Server created and listening on TCP port {TcpPort}");

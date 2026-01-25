@@ -91,7 +91,8 @@ namespace BaseLib.Extensions
                 int totalRead = 0;
                 while (totalRead < remaining)
                 {
-                    int read = await stream.ReadAsync(result.AsMemory(totalRead, remaining - totalRead));
+                    int read = await stream.ReadAsync(result.AsMemory(totalRead, remaining - totalRead))
+                        .ConfigureAwait(false);
                     if (read == 0)
                         break;
                     totalRead += read;
@@ -105,7 +106,7 @@ namespace BaseLib.Extensions
             try
             {
                 int bytesRead;
-                while ((bytesRead = await stream.ReadAsync(rentedBuffer.AsMemory())) > 0)
+                while ((bytesRead = await stream.ReadAsync(rentedBuffer.AsMemory()).ConfigureAwait(false)) > 0)
                     memoryStream.Write(rentedBuffer, 0, bytesRead);
             }
             finally
