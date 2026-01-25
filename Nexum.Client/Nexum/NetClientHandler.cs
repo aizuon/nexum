@@ -1509,10 +1509,10 @@ namespace Nexum.Client
             var rsaKeyBuffer = new ByteArray();
 
             if (message.Read(ref settings.EnableServerLog)
-                && message.Read(out byte fallbackMethod)
+                && message.Read(ref settings.FallbackMethod)
                 && message.Read(ref settings.MessageMaxLength)
                 && message.Read(ref settings.IdleTimeout)
-                && message.Read(out byte directP2PStartCondition)
+                && message.Read(ref settings.DirectP2PStartCondition)
                 && message.Read(ref settings.OverSendSuspectingThresholdInBytes)
                 && message.Read(ref settings.EnableNagleAlgorithm)
                 && message.Read(ref settings.EncryptedMessageKeyLength)
@@ -1525,8 +1525,6 @@ namespace Nexum.Client
                 && message.Read(ref settings.EnablePingTest)
                 && message.Read(ref settings.EmergencyLogLineCount))
             {
-                settings.FallbackMethod = (FallbackMethod)fallbackMethod;
-                settings.DirectP2PStartCondition = (DirectP2PStartCondition)directP2PStartCondition;
                 client.NetSettings = settings;
                 client.UdpDefragBoard.MaxMessageLength = settings.MessageMaxLength;
 
