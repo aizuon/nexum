@@ -419,7 +419,7 @@ namespace Nexum.Server
                         session.ConnectTimeoutSent = true;
 
                         var connectTimedoutMsg = new NetMessage();
-                        connectTimedoutMsg.WriteEnum(MessageType.ConnectServerTimedout);
+                        connectTimedoutMsg.Write(MessageType.ConnectServerTimedout);
                         session.NexumToClient(connectTimedoutMsg);
 
                         session.Dispose();

@@ -316,7 +316,7 @@ namespace Nexum.Client
             if (message.Compress)
                 data.Compress = true;
 
-            data.WriteEnum(MessageType.RMI);
+            data.Write(MessageType.RMI);
             data.Write(rmiId);
             data.Write(message);
             NexumToServer(data);
@@ -333,7 +333,7 @@ namespace Nexum.Client
             if (message.Compress)
                 data.Compress = true;
 
-            data.WriteEnum(MessageType.RMI);
+            data.Write(MessageType.RMI);
             data.Write(rmiId);
             data.Write(message);
 
@@ -732,7 +732,7 @@ namespace Nexum.Client
             int paddingSize = ServerMtuDiscovery.GetProbePaddingSize(currentTime);
 
             var unreliablePing = new NetMessage();
-            unreliablePing.WriteEnum(MessageType.UnreliablePing);
+            unreliablePing.Write(MessageType.UnreliablePing);
             unreliablePing.Write(currentTime);
             unreliablePing.Write(ServerUdpRecentPing);
 
@@ -824,21 +824,11 @@ namespace Nexum.Client
 
         private void ToServer(NetMessage message)
         {
-            ToServer(message.GetBuffer());
-        }
-
-        private void ToServer(byte[] data)
-        {
-            var buffer = Unpooled.WrappedBuffer(data);
+            var buffer = Unpooled.WrappedBuffer(message.GetBufferUnsafe(), 0, message.Length);
             Channel.WriteAndFlushAsync(buffer);
         }
 
         private void ToServerUdp(NetMessage message)
-        {
-            ToServerUdp(message.GetBuffer());
-        }
-
-        private void ToServerUdp(byte[] data)
         {
             var channel = UdpChannel;
             if (channel == null || !channel.Active || ServerUdpSocket == null)
@@ -847,7 +837,7 @@ namespace Nexum.Client
                 return;
             }
 
-            foreach (var udpMessage in UdpFragBoard.FragmentPacket(data, HostId,
+            foreach (var udpMessage in UdpFragBoard.FragmentPacket(message, HostId,
                          (uint)Core.HostId.Server))
             {
                 udpMessage.EndPoint = ServerUdpSocket;

@@ -24,12 +24,15 @@ namespace Nexum.Server
             _logger = Log.ForContext(Constants.SourceContextPropertyName, $"{nameof(UdpHandler)}({port})");
         }
 
+        private ILogger GetLoggerForUnknownSession(UdpMessage message)
+        {
+            return _logger.ForContext("EndPoint",
+                message.EndPoint.ToIPv4String());
+        }
+
         public override void ChannelRead(IChannelHandlerContext context, object obj)
         {
             var message = obj as UdpMessage;
-
-            var log = _logger.ForContext("EndPoint",
-                message.EndPoint.ToIPv4String());
 
             Owner.UdpSessions.TryGetValue(message.FilterTag, out var session);
 
@@ -50,19 +53,21 @@ namespace Nexum.Server
 
                 if (defragResult == AssembledPacketError.Error)
                 {
-                    log.Warning("UDP defragmentation error for unknown session: {Error}", defragError);
+                    GetLoggerForUnknownSession(message)
+                        .Warning("UDP defragmentation error for unknown session: {Error}", defragError);
                     message.Content.Release();
                     return;
                 }
 
                 var holepunchMessage = new NetMessage(holepunchPacket.Packet.AssembledData, true);
 
-                if (!holepunchMessage.ReadEnum<MessageType>(out var messageType))
+                if (!holepunchMessage.Read<MessageType>(out var messageType))
                     return;
 
                 if (messageType != MessageType.ServerHolepunch)
                 {
-                    log.Warning("Expected ServerHolepunch as first UDP message but got {MessageType}",
+                    GetLoggerForUnknownSession(message).Warning(
+                        "Expected ServerHolepunch as first UDP message but got {MessageType}",
                         messageType);
                     message.Content.Release();
                     return;
@@ -70,35 +75,35 @@ namespace Nexum.Server
 
                 holepunchMessage.Read(out Guid magicNumber);
 
-                Owner.MagicNumberSessions.TryGetValue(magicNumber, out var session2);
+                Owner.MagicNumberSessions.TryGetValue(magicNumber, out session);
 
-                if (session2 == null)
+                if (session == null)
                 {
-                    log.Warning("Invalid holepunch magic number {MagicNumber}", magicNumber);
+                    GetLoggerForUnknownSession(message)
+                        .Warning("Invalid holepunch magic number {MagicNumber}", magicNumber);
                     return;
                 }
 
-                lock (session2.UdpInitLock)
+                lock (session.UdpInitLock)
                 {
-                    if (session2.UdpSessionInitialized)
+                    if (session.UdpSessionInitialized)
                         return;
 
-                    session2.UdpSessionInitialized = true;
-                    session2.UdpEndPointInternal = message.EndPoint;
+                    session.UdpSessionInitialized = true;
+                    session.UdpEndPointInternal = message.EndPoint;
                 }
 
-                Owner.UdpSessions.TryAdd(FilterTag.Create(session2.HostId, (uint)HostId.Server), session2);
-
-                session2.Logger.Debug("UDP holepunch successful, endpoint = {UdpEndPoint}",
-                    session2.UdpEndPoint);
+                Owner.UdpSessions.TryAdd(FilterTag.Create(session.HostId, (uint)HostId.Server), session);
+                session.Logger.Debug("UDP holepunch successful, endpoint = {UdpEndPoint}",
+                    session.UdpEndPoint);
 
                 var serverHolepunchAck = new NetMessage();
-                serverHolepunchAck.WriteEnum(MessageType.ServerHolepunchAck);
-                serverHolepunchAck.Write(session2.HolepunchMagicNumber);
-                serverHolepunchAck.Write(session2.UdpEndPoint);
+                serverHolepunchAck.Write(MessageType.ServerHolepunchAck);
+                serverHolepunchAck.Write(session.HolepunchMagicNumber);
+                serverHolepunchAck.Write(session.UdpEndPoint);
 
-                session2.NexumToClientUdpIfAvailable(serverHolepunchAck, true);
-                var capturedSession = session2;
+                session.NexumToClientUdpIfAvailable(serverHolepunchAck, true);
+                var capturedSession = session;
                 HolepunchHelper.SendBurstMessagesWithCheck(
                     () => HolepunchHelper.CreateServerHolepunchAckMessage(
                         capturedSession.HolepunchMagicNumber, capturedSession.UdpEndPoint),

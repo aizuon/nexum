@@ -12,7 +12,7 @@ namespace Nexum.Core
         {
             var encryptedPayload = new ByteArray();
 
-            if (!message.ReadEnum<EncryptMode>(out var encryptMode) || !message.Read(ref encryptedPayload))
+            if (!message.Read<EncryptMode>(out var encryptMode) || !message.Read(ref encryptedPayload))
                 return false;
 
             byte[] decryptedBuffer = crypt.Decrypt(
@@ -39,7 +39,7 @@ namespace Nexum.Core
                 return false;
             }
 
-            byte[] buffer = GC.AllocateUninitializedArray<byte>((int)compressedSize);
+            byte[] buffer = null;
             if (!message.Read(ref buffer, (int)compressedSize))
             {
                 logger.Error("Corrupted compressed packet!");

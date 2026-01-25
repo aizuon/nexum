@@ -190,7 +190,7 @@ namespace Nexum.Server
             if (message.Compress)
                 data.Compress = true;
 
-            data.WriteEnum(MessageType.RMI);
+            data.Write(MessageType.RMI);
             data.Write(rmiId);
             data.Write(message);
             NexumToClient(data);
@@ -224,7 +224,7 @@ namespace Nexum.Server
             if (message.Compress)
                 data.Compress = true;
 
-            data.WriteEnum(MessageType.RMI);
+            data.Write(MessageType.RMI);
             data.Write(rmiId);
             data.Write(message);
 
@@ -332,7 +332,7 @@ namespace Nexum.Server
 
         private void ToClient(NetMessage message)
         {
-            var buffer = Unpooled.WrappedBuffer(message.GetBuffer());
+            var buffer = Unpooled.WrappedBuffer(message.GetBufferUnsafe(), 0, message.Length);
             Channel.WriteAndFlushAsync(buffer);
         }
 
@@ -345,9 +345,8 @@ namespace Nexum.Server
                 return;
             }
 
-            byte[] data = message.GetBuffer();
             foreach (var udpMessage in
-                     UdpFragBoard.FragmentPacket(data, (uint)Core.HostId.Server, HostId))
+                     UdpFragBoard.FragmentPacket(message, (uint)Core.HostId.Server, HostId))
             {
                 udpMessage.EndPoint = UdpEndPoint;
                 channel.WriteAndFlushAsync(udpMessage);

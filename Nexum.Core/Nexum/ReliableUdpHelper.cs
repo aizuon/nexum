@@ -9,8 +9,8 @@ namespace Nexum.Core
         internal static NetMessage BuildFrameMessage(ReliableUdpFrame frame)
         {
             var msg = new NetMessage();
-            msg.WriteEnum(MessageType.ReliableUdp_Frame);
-            msg.WriteEnum(frame.Type);
+            msg.Write(MessageType.ReliableUdp_Frame);
+            msg.Write(frame.Type);
 
             switch (frame.Type)
             {
@@ -55,7 +55,7 @@ namespace Nexum.Core
 
                     if (dataLength > 0)
                     {
-                        byte[] data = GC.AllocateUninitializedArray<byte>((int)dataLength);
+                        byte[] data = null;
                         if (!msg.Read(ref data, (int)dataLength))
                             return false;
                         frame.Data = data;

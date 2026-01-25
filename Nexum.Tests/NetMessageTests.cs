@@ -71,23 +71,12 @@ namespace Nexum.Tests
         }
 
         [Fact]
-        public void Buffer_ReturnsBufferCopy()
-        {
-            var message = new NetMessage();
-            message.Write(new byte[] { 1, 2, 3 });
-            byte[] buffer1 = message.Buffer;
-            byte[] buffer2 = message.Buffer;
-            Assert.NotSame(buffer1, buffer2);
-            Assert.Equal(buffer1, buffer2);
-        }
-
-        [Fact]
         public void WriteRead_MessageType_RoundTrip()
         {
             var message = new NetMessage();
             var expected = MessageType.Compressed;
-            message.WriteEnum(expected);
-            bool success = message.ReadEnum<MessageType>(out var result);
+            message.Write(expected);
+            bool success = message.Read<MessageType>(out var result);
             Assert.True(success, "Should successfully read MessageType");
             Assert.Equal(expected, result);
         }
@@ -98,8 +87,7 @@ namespace Nexum.Tests
             var message = new NetMessage();
             string expected = "Hello World";
             message.Write(expected);
-            string result = string.Empty;
-            bool success = message.ReadString(ref result);
+            bool success = message.Read(out string result);
             Assert.True(success, "Should successfully read non-unicode string");
             Assert.Equal(expected, result);
         }
@@ -110,8 +98,7 @@ namespace Nexum.Tests
             var message = new NetMessage();
             string expected = "Hello 世界 🌍";
             message.Write(expected, true);
-            string result = string.Empty;
-            bool success = message.Read(ref result, out bool isUnicode);
+            bool success = message.Read(out string result, out bool isUnicode);
             Assert.True(success, "Should successfully read unicode string");
             Assert.True(isUnicode, "String should be detected as unicode");
             Assert.Equal(expected, result);
@@ -123,8 +110,7 @@ namespace Nexum.Tests
             var message = new NetMessage();
             string expected = string.Empty;
             message.Write(expected);
-            string result = "not empty";
-            bool success = message.ReadString(ref result);
+            bool success = message.Read(out string result);
             Assert.True(success, "Should successfully read empty string");
             Assert.Equal(expected, result);
         }
@@ -146,8 +132,7 @@ namespace Nexum.Tests
             var message = new NetMessage();
             var expected = new Version(1, 2, 3, 4);
             message.Write(expected);
-            var result = new Version();
-            bool success = message.ReadVersion(ref result);
+            bool success = message.Read(out Version result);
             Assert.True(success, "Should successfully read Version");
             Assert.Equal(expected, result);
         }
@@ -158,8 +143,7 @@ namespace Nexum.Tests
             var message = new NetMessage();
             var expected = new IPEndPoint(IPAddress.Parse("192.168.1.1"), 8080);
             message.Write(expected);
-            IPEndPoint result = null;
-            bool success = message.ReadIPEndPoint(ref result);
+            bool success = message.Read(out IPEndPoint result);
             Assert.True(success, "Should successfully read IPEndPoint");
             Assert.Equal(expected.Address, result.Address);
             Assert.Equal(expected.Port, result.Port);
@@ -171,8 +155,7 @@ namespace Nexum.Tests
             var message = new NetMessage();
             var expected = new IPEndPoint(IPAddress.Parse("192.168.1.100"), 9090);
             message.WriteStringEndPoint(expected);
-            IPEndPoint result = null;
-            bool success = message.ReadStringEndPoint(ref result);
+            bool success = message.ReadStringEndPoint(out var result);
             Assert.True(success, "Should successfully read string-encoded IPEndPoint");
             Assert.Equal(expected.Address, result.Address);
             Assert.Equal(expected.Port, result.Port);
@@ -187,19 +170,9 @@ namespace Nexum.Tests
             message2.Compress = true;
             message2.EncryptMode = EncryptMode.Fast;
             message1.Write(message2);
-            Assert.Equal(message2.Buffer, message1.Buffer);
+            Assert.Equal(message2.GetBuffer(), message1.GetBuffer());
             Assert.Equal(message2.Compress, message1.Compress);
             Assert.Equal(message2.EncryptMode, message1.EncryptMode);
-        }
-
-        [Fact]
-        public void ReadString_ReturnsString()
-        {
-            var message = new NetMessage();
-            string expected = "Test String";
-            message.Write(expected);
-            string result = message.ReadString();
-            Assert.Equal(expected, result);
         }
 
         [Fact]
@@ -319,8 +292,7 @@ namespace Nexum.Tests
             var expected = new IPEndPoint(IPAddress.Loopback, 12345);
 
             message.Write(expected);
-            IPEndPoint result = null;
-            bool success = message.ReadIPEndPoint(ref result);
+            bool success = message.Read(out IPEndPoint result);
 
             Assert.True(success, "Should successfully read loopback IPEndPoint");
             Assert.Equal(expected.Address, result.Address);
@@ -334,8 +306,7 @@ namespace Nexum.Tests
             string expected = new string('A', 10000);
 
             message.Write(expected);
-            string result = string.Empty;
-            bool success = message.ReadString(ref result);
+            bool success = message.Read(out string result);
 
             Assert.True(success, "Should successfully read long string");
             Assert.Equal(expected, result);

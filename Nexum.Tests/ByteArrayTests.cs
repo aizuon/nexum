@@ -360,7 +360,7 @@ namespace Nexum.Tests
         {
             var byteArray = new ByteArray();
 
-            byteArray.WriteEnum(TestEnum.Value2);
+            byteArray.Write(TestEnum.Value2);
 
             Assert.Equal(4, byteArray.Length);
         }

@@ -36,7 +36,7 @@ namespace Nexum.Client
         {
             message.WriteOffset = message.Length;
 
-            if (!message.ReadEnum<MessageType>(out var messageType))
+            if (!message.Read<MessageType>(out var messageType))
                 return;
 
             if (udpEndPoint != null)
@@ -289,9 +289,7 @@ namespace Nexum.Client
 
         private static void ServerHolepunchAckHandler(NetClient client, NetMessage message)
         {
-            var selfUdpSocket = new IPEndPoint(IPAddress.Loopback, IPEndPoint.MinPort);
-
-            if (!message.Read(out Guid magicNumber) || !message.ReadIPEndPoint(ref selfUdpSocket))
+            if (!message.Read(out Guid magicNumber) || !message.Read(out IPEndPoint selfUdpSocket))
                 return;
 
             var udpChannel = client.UdpChannel;
@@ -327,7 +325,7 @@ namespace Nexum.Client
                 selfUdpSocket);
 
             var notifyHolepunchSuccess = new NetMessage();
-            notifyHolepunchSuccess.WriteEnum(MessageType.NotifyHolepunchSuccess);
+            notifyHolepunchSuccess.Write(MessageType.NotifyHolepunchSuccess);
             notifyHolepunchSuccess.Write(capturedMagicNumber);
             notifyHolepunchSuccess.Write(new IPEndPoint(client.LocalIP,
                 ((IPEndPoint)udpChannel.LocalAddress).Port));
@@ -404,9 +402,7 @@ namespace Nexum.Client
 
         private static void PeerUdpServerHolepunchAckHandler(NetClient client, NetMessage message)
         {
-            var selfUdpSocket = new IPEndPoint(IPAddress.Loopback, IPEndPoint.MinPort);
-
-            if (!message.Read(out Guid magicNumber) || !message.ReadIPEndPoint(ref selfUdpSocket) ||
+            if (!message.Read(out Guid magicNumber) || !message.Read(out IPEndPoint selfUdpSocket) ||
                 !message.Read(out uint hostId))
                 return;
 
@@ -469,7 +465,7 @@ namespace Nexum.Client
                     }
 
                     var peerUdpNotifyHolepunchSuccess = new NetMessage();
-                    peerUdpNotifyHolepunchSuccess.WriteEnum(MessageType.PeerUdp_NotifyHolepunchSuccess);
+                    peerUdpNotifyHolepunchSuccess.Write(MessageType.PeerUdp_NotifyHolepunchSuccess);
 
                     p2pMember.SelfUdpLocalSocket = new IPEndPoint(client.LocalIP, port);
                     peerUdpNotifyHolepunchSuccess.Write(p2pMember.SelfUdpLocalSocket);
@@ -485,12 +481,10 @@ namespace Nexum.Client
 
         private static void PeerUdpPeerHolepunchHandler(NetClient client, NetMessage message, IPEndPoint udpEndPoint)
         {
-            var selfUdpSocket = new IPEndPoint(IPAddress.Loopback, IPEndPoint.MinPort);
-
             if (!message.Read(out uint hostId)
                 || !message.Read(out Guid magicNumber)
                 || !message.Read(out Guid serverInstanceGuid)
-                || !message.ReadIPEndPoint(ref selfUdpSocket))
+                || !message.Read(out IPEndPoint selfUdpSocket))
                 return;
 
             if (!serverInstanceGuid.Equals(client.ServerInstanceGuid))
@@ -621,15 +615,11 @@ namespace Nexum.Client
 
         private static void PeerUdpPeerHolepunchAckHandler(NetClient client, NetMessage message, IPEndPoint udpEndPoint)
         {
-            var peerSendAddr = new IPEndPoint(IPAddress.Loopback, IPEndPoint.MinPort);
-            var selfRecvAddr = new IPEndPoint(IPAddress.Loopback, IPEndPoint.MinPort);
-            var selfSendAddr = new IPEndPoint(IPAddress.Loopback, IPEndPoint.MinPort);
-
             if (!message.Read(out Guid magicNumber)
                 || !message.Read(out uint hostId)
-                || !message.ReadIPEndPoint(ref peerSendAddr)
-                || !message.ReadIPEndPoint(ref selfRecvAddr)
-                || !message.ReadIPEndPoint(ref selfSendAddr))
+                || !message.Read(out IPEndPoint peerSendAddr)
+                || !message.Read(out IPEndPoint selfRecvAddr)
+                || !message.Read(out IPEndPoint selfSendAddr))
                 return;
 
             if (!client.P2PGroup.P2PMembersInternal.TryGetValue(hostId, out var p2pMember))
@@ -705,7 +695,7 @@ namespace Nexum.Client
                 p2pMember.LastUdpReceivedTime = client.GetAbsoluteTime();
 
                 var p2pReplyIndirectServerTimeAndPong = new NetMessage();
-                p2pReplyIndirectServerTimeAndPong.WriteEnum(MessageType.P2PReplyIndirectServerTimeAndPong);
+                p2pReplyIndirectServerTimeAndPong.Write(MessageType.P2PReplyIndirectServerTimeAndPong);
                 p2pReplyIndirectServerTimeAndPong.Write(time);
 
                 p2pReplyIndirectServerTimeAndPong.Write(paddingSize);
@@ -924,7 +914,7 @@ namespace Nexum.Client
 
         private static void RMIHandler(NetClient client, NetMessage message, ushort filterTag, IPEndPoint udpEndPoint)
         {
-            if (!message.ReadEnum<NexumOpCode>(out var rmiId))
+            if (!message.Read<NexumOpCode>(out var rmiId))
                 return;
 
             switch (rmiId)
@@ -993,8 +983,7 @@ namespace Nexum.Client
 
                 case NexumOpCode.S2C_RequestCreateUdpSocket:
                 {
-                    var udpSocket = new IPEndPoint(IPAddress.Loopback, IPEndPoint.MinPort);
-                    if (!message.ReadStringEndPoint(ref udpSocket))
+                    if (!message.ReadStringEndPoint(out var udpSocket))
                         return;
 
                     var serverTcpAddress = ((IPEndPoint)client.Channel.RemoteAddress).Address.MapToIPv4();
@@ -1041,8 +1030,7 @@ namespace Nexum.Client
                     if (!message.Read(out bool result) || !result)
                         return;
 
-                    var udpSocket = new IPEndPoint(IPAddress.Loopback, IPEndPoint.MinPort);
-                    if (!message.ReadStringEndPoint(ref udpSocket))
+                    if (!message.ReadStringEndPoint(out var udpSocket))
                         return;
 
                     var serverTcpAddress = ((IPEndPoint)client.Channel.RemoteAddress).Address;
@@ -1075,14 +1063,9 @@ namespace Nexum.Client
 
                 case NexumOpCode.P2PRecycleComplete:
                 {
-                    var internalAddr = new IPEndPoint(IPAddress.Loopback, IPEndPoint.MinPort);
-                    var externalAddr = new IPEndPoint(IPAddress.Loopback, IPEndPoint.MinPort);
-                    var sendAddr = new IPEndPoint(IPAddress.Loopback, IPEndPoint.MinPort);
-                    var recvAddr = new IPEndPoint(IPAddress.Loopback, IPEndPoint.MinPort);
-
                     if (!message.Read(out uint hostId) || !message.Read(out bool recycled) ||
-                        !message.ReadIPEndPoint(ref internalAddr) || !message.ReadIPEndPoint(ref externalAddr) ||
-                        !message.ReadIPEndPoint(ref sendAddr) || !message.ReadIPEndPoint(ref recvAddr))
+                        !message.Read(out IPEndPoint internalAddr) || !message.Read(out IPEndPoint externalAddr) ||
+                        !message.Read(out IPEndPoint sendAddr) || !message.Read(out IPEndPoint recvAddr))
                         return;
 
                     client.Logger.Debug("P2PRecycleComplete => hostId = {HostId}, recycled = {Recycled}", hostId,
@@ -1208,7 +1191,7 @@ namespace Nexum.Client
                     }
 
                     var peerUdpServerHolepunch = new NetMessage();
-                    peerUdpServerHolepunch.WriteEnum(MessageType.PeerUdp_ServerHolepunch);
+                    peerUdpServerHolepunch.Write(MessageType.PeerUdp_ServerHolepunch);
                     peerUdpServerHolepunch.Write(magicNumber);
                     peerUdpServerHolepunch.Write(hostId);
 
@@ -1228,10 +1211,7 @@ namespace Nexum.Client
                     if (!message.Read(out uint hostId))
                         return;
 
-                    var localEndpoint = new IPEndPoint(IPAddress.Loopback, IPEndPoint.MinPort);
-                    var remoteEndpoint = new IPEndPoint(IPAddress.Loopback, IPEndPoint.MinPort);
-
-                    if (!message.ReadIPEndPoint(ref localEndpoint) || !message.ReadIPEndPoint(ref remoteEndpoint))
+                    if (!message.Read(out IPEndPoint localEndpoint) || !message.Read(out IPEndPoint remoteEndpoint))
                         return;
 
                     client.Logger.Debug(
@@ -1330,17 +1310,12 @@ namespace Nexum.Client
 
                 case NexumOpCode.NotifyDirectP2PEstablish:
                 {
-                    var aSendAddrToB = new IPEndPoint(IPAddress.Loopback, IPEndPoint.MinPort);
-                    var bRecvAddrFromA = new IPEndPoint(IPAddress.Loopback, IPEndPoint.MinPort);
-                    var bSendAddrToA = new IPEndPoint(IPAddress.Loopback, IPEndPoint.MinPort);
-                    var aRecvAddrFromB = new IPEndPoint(IPAddress.Loopback, IPEndPoint.MinPort);
-
                     if (!message.Read(out uint hostIdA)
                         || !message.Read(out uint hostIdB)
-                        || !message.ReadIPEndPoint(ref aSendAddrToB)
-                        || !message.ReadIPEndPoint(ref bRecvAddrFromA)
-                        || !message.ReadIPEndPoint(ref bSendAddrToA)
-                        || !message.ReadIPEndPoint(ref aRecvAddrFromB))
+                        || !message.Read(out IPEndPoint aSendAddrToB)
+                        || !message.Read(out IPEndPoint bRecvAddrFromA)
+                        || !message.Read(out IPEndPoint bSendAddrToA)
+                        || !message.Read(out IPEndPoint aRecvAddrFromB))
                         return;
 
                     if (client.HostId == hostIdB)
@@ -1588,7 +1563,7 @@ namespace Nexum.Client
                 client.RSA.ImportParameters(rsaParameters);
 
                 var notifyCSEncryptedSessionKey = new NetMessage();
-                notifyCSEncryptedSessionKey.WriteEnum(MessageType.NotifyCSEncryptedSessionKey);
+                notifyCSEncryptedSessionKey.Write(MessageType.NotifyCSEncryptedSessionKey);
                 notifyCSEncryptedSessionKey.Write(new ByteArray(client.RSA.Encrypt(client.Crypt.GetKey(), true), true));
                 notifyCSEncryptedSessionKey.Write(new ByteArray(client.Crypt.EncryptKey(client.Crypt.GetFastKey()),
                     true));
@@ -1602,7 +1577,7 @@ namespace Nexum.Client
             client.Logger.Debug("NotifyCSSessionKeySuccess");
 
             var notifyServerConnectionRequestData = new NetMessage();
-            notifyServerConnectionRequestData.WriteEnum(MessageType.NotifyServerConnectionRequestData);
+            notifyServerConnectionRequestData.Write(MessageType.NotifyServerConnectionRequestData);
             notifyServerConnectionRequestData.Write(new ByteArray());
             notifyServerConnectionRequestData.Write(client.ServerGuid);
             notifyServerConnectionRequestData.Write(Constants.NetVersion);
@@ -1612,12 +1587,11 @@ namespace Nexum.Client
         private static void NotifyServerConnectSuccessHandler(NetClient client, NetMessage message)
         {
             var connectionPayload = new ByteArray();
-            var serverEndPoint = new IPEndPoint(IPAddress.Any, 0);
 
             if (!message.Read(out uint hostId)
                 || !message.Read(out Guid serverInstanceGuid)
                 || !message.Read(ref connectionPayload)
-                || !message.ReadIPEndPoint(ref serverEndPoint))
+                || !message.Read(out IPEndPoint serverEndPoint))
                 return;
 
             client.Logger.Debug(

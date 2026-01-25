@@ -23,7 +23,7 @@ namespace Nexum.Core
                 zlib.Write(message.GetBufferSpan());
                 zlib.Close();
 
-                compressedMessage.WriteEnum(MessageType.Compressed);
+                compressedMessage.Write(MessageType.Compressed);
 
                 ArraySegment<byte> buffer;
                 if (!mem.TryGetBuffer(out buffer))
@@ -56,12 +56,11 @@ namespace Nexum.Core
             var decompressedMessage = new NetMessage();
             try
             {
-                byte[] inputBuffer = message.GetBuffer();
-                using (var inputStream = new MemoryStream(inputBuffer, 0, message.Length))
+                using (var inputStream = new MemoryStream(message.GetBufferUnsafe(), 0, message.Length))
                 using (var zlib = new ZLibStream(inputStream, CompressionMode.Decompress))
                 using (var outputStream = new MemoryStream())
                 {
-                    byte[] buffer = ArrayPool<byte>.Shared.Rent(NetConfig.MessageMaxLength * 4);
+                    byte[] buffer = ArrayPool<byte>.Shared.Rent(16 * 1024);
                     try
                     {
                         int bytesRead;

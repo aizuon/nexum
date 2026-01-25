@@ -9,7 +9,7 @@ namespace Nexum.Core
 {
     public abstract class NetCore : IDisposable
     {
-        protected NetCore()
+        static NetCore()
         {
             Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
         }

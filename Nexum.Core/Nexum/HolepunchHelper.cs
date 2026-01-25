@@ -12,7 +12,7 @@ namespace Nexum.Core
         internal static NetMessage CreateServerHolepunchMessage(Guid magicNumber)
         {
             var msg = new NetMessage();
-            msg.WriteEnum(MessageType.ServerHolepunch);
+            msg.Write(MessageType.ServerHolepunch);
             msg.Write(magicNumber);
             return msg;
         }
@@ -21,7 +21,7 @@ namespace Nexum.Core
         internal static NetMessage CreateServerHolepunchAckMessage(Guid magicNumber, IPEndPoint udpEndPoint)
         {
             var msg = new NetMessage();
-            msg.WriteEnum(MessageType.ServerHolepunchAck);
+            msg.Write(MessageType.ServerHolepunchAck);
             msg.Write(magicNumber);
             msg.Write(udpEndPoint);
             return msg;
@@ -31,7 +31,7 @@ namespace Nexum.Core
         internal static NetMessage CreateNotifyClientServerUdpMatchedMessage(Guid magicNumber)
         {
             var msg = new NetMessage();
-            msg.WriteEnum(MessageType.NotifyClientServerUdpMatched);
+            msg.Write(MessageType.NotifyClientServerUdpMatched);
             msg.Write(magicNumber);
             return msg;
         }
@@ -40,7 +40,7 @@ namespace Nexum.Core
         internal static NetMessage CreatePeerUdpServerHolepunchMessage(Guid magicNumber, uint targetHostId)
         {
             var msg = new NetMessage();
-            msg.WriteEnum(MessageType.PeerUdp_ServerHolepunch);
+            msg.Write(MessageType.PeerUdp_ServerHolepunch);
             msg.Write(magicNumber);
             msg.Write(targetHostId);
             return msg;
@@ -51,7 +51,7 @@ namespace Nexum.Core
             uint targetHostId)
         {
             var msg = new NetMessage();
-            msg.WriteEnum(MessageType.PeerUdp_ServerHolepunchAck);
+            msg.Write(MessageType.PeerUdp_ServerHolepunchAck);
             msg.Write(magicNumber);
             msg.Write(udpEndPoint);
             msg.Write(targetHostId);
@@ -63,7 +63,7 @@ namespace Nexum.Core
             Guid serverInstanceGuid, IPEndPoint targetEndpoint)
         {
             var msg = new NetMessage();
-            msg.WriteEnum(MessageType.PeerUdp_PeerHolepunch);
+            msg.Write(MessageType.PeerUdp_PeerHolepunch);
             msg.Write(hostId);
             msg.Write(peerMagicNumber);
             msg.Write(serverInstanceGuid);
@@ -76,7 +76,7 @@ namespace Nexum.Core
             IPEndPoint selfUdpSocket, IPEndPoint receivedEndPoint, IPEndPoint targetEndPoint)
         {
             var msg = new NetMessage();
-            msg.WriteEnum(MessageType.PeerUdp_PeerHolepunchAck);
+            msg.Write(MessageType.PeerUdp_PeerHolepunchAck);
             msg.Write(magicNumber);
             msg.Write(hostId);
             msg.Write(selfUdpSocket);

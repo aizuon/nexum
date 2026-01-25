@@ -39,12 +39,12 @@ namespace Nexum.Server
             session.UdpDefragBoard.MaxMessageLength = config.MessageMaxLength;
 
             var notifyServerConnectionHint = new NetMessage();
-            notifyServerConnectionHint.WriteEnum(MessageType.NotifyServerConnectionHint);
+            notifyServerConnectionHint.Write(MessageType.NotifyServerConnectionHint);
             notifyServerConnectionHint.Write(config.EnableServerLog);
-            notifyServerConnectionHint.WriteEnum(config.FallbackMethod);
+            notifyServerConnectionHint.Write(config.FallbackMethod);
             notifyServerConnectionHint.Write(config.MessageMaxLength);
             notifyServerConnectionHint.Write(config.IdleTimeout);
-            notifyServerConnectionHint.WriteEnum(config.DirectP2PStartCondition);
+            notifyServerConnectionHint.Write(config.DirectP2PStartCondition);
             notifyServerConnectionHint.Write(config.OverSendSuspectingThresholdInBytes);
             notifyServerConnectionHint.Write(config.EnableNagleAlgorithm);
             notifyServerConnectionHint.Write(config.EncryptedMessageKeyLength);

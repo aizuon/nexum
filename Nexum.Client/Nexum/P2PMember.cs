@@ -116,7 +116,7 @@ namespace Nexum.Client
             if (message.Compress)
                 data.Compress = true;
 
-            data.WriteEnum(MessageType.RMI);
+            data.Write(MessageType.RMI);
             data.Write(rmiId);
             data.Write(message);
 
@@ -149,7 +149,7 @@ namespace Nexum.Client
                 if (message.Compress)
                     reliableRelay.Compress = true;
 
-                reliableRelay.WriteEnum(MessageType.ReliableRelay1);
+                reliableRelay.Write(MessageType.ReliableRelay1);
                 reliableRelay.WriteScalar(1);
                 reliableRelay.Write(HostId);
                 reliableRelay.Write(SelfFrameNumber);
@@ -172,8 +172,8 @@ namespace Nexum.Client
                 if (message.Compress)
                     unreliableRelay.Compress = true;
 
-                unreliableRelay.WriteEnum(MessageType.UnreliableRelay1);
-                unreliableRelay.WriteEnum(MessagePriority.Ring0);
+                unreliableRelay.Write(MessageType.UnreliableRelay1);
+                unreliableRelay.Write(MessagePriority.Ring0);
                 unreliableRelay.WriteScalar(0);
                 unreliableRelay.WriteScalar(1);
                 unreliableRelay.Write(HostId);
@@ -408,7 +408,7 @@ namespace Nexum.Client
             {
                 var notifyDirectP2PDisconnected = new NetMessage();
                 notifyDirectP2PDisconnected.Write(HostId);
-                notifyDirectP2PDisconnected.WriteEnum(ErrorType.P2PUdpFailed);
+                notifyDirectP2PDisconnected.Write(ErrorType.P2PUdpFailed);
                 Owner.RmiToServer((ushort)NexumOpCode.P2P_NotifyDirectP2PDisconnected, notifyDirectP2PDisconnected);
             }
 
@@ -423,7 +423,7 @@ namespace Nexum.Client
             int paddingSize = MtuDiscovery.GetProbePaddingSize(currentTime);
 
             var p2pRequestIndirectServerTimeAndPing = new NetMessage();
-            p2pRequestIndirectServerTimeAndPing.WriteEnum(MessageType.P2PRequestIndirectServerTimeAndPing);
+            p2pRequestIndirectServerTimeAndPing.Write(MessageType.P2PRequestIndirectServerTimeAndPing);
             p2pRequestIndirectServerTimeAndPing.Write(currentTime);
 
             if (paddingSize > 0)
@@ -439,13 +439,7 @@ namespace Nexum.Client
             NexumToPeer(p2pRequestIndirectServerTimeAndPing);
         }
 
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private void ToPeer(NetMessage message, IPEndPoint endPoint = null)
-        {
-            ToPeer(message.GetBuffer(), endPoint);
-        }
-
-        private void ToPeer(byte[] data, IPEndPoint endPoint = null)
         {
             var dest = PeerLocalToRemoteSocket ?? endPoint;
             var channel = PeerUdpChannel;
@@ -455,7 +449,7 @@ namespace Nexum.Client
                 return;
             }
 
-            foreach (var udpMessage in UdpFragBoard.FragmentPacket(data, Owner.HostId, HostId))
+            foreach (var udpMessage in UdpFragBoard.FragmentPacket(message, Owner.HostId, HostId))
             {
                 udpMessage.EndPoint = dest;
                 channel.WriteAndFlushAsync(udpMessage);
