@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Amazon.EC2;
 using Amazon.EC2.Model;
@@ -196,15 +198,130 @@ namespace Nexum.Tests.E2E.Orchestration
                 ]
             });
 
-            var latestAmi = response.Images
-                .OrderByDescending(i => i.CreationDate)
+
+            var images = response.Images ?? new List<Image>();
+
+            var standardCandidates = images
+                .Where(IsStandardAmazonLinux2023Ami)
+                .Select(i => new
+                {
+                    Image = i,
+                    Kernel = TryParseKernelVersion(i.Name),
+                    Created = TryParseCreationDate(i.CreationDate)
+                })
+                .ToList();
+
+            var bestStandard = standardCandidates
+                .OrderByDescending(x => x.Kernel ?? new Version(0, 0))
+                .ThenByDescending(x => x.Created ?? DateTimeOffset.MinValue)
                 .FirstOrDefault();
 
-            if (latestAmi == null)
+            var bestNonMinimal = images
+                .Where(i => !IsMinimalAmazonLinux2023Ami(i))
+                .Select(i => new
+                {
+                    Image = i,
+                    Kernel = TryParseKernelVersion(i.Name),
+                    Created = TryParseCreationDate(i.CreationDate)
+                })
+                .OrderByDescending(x => x.Kernel ?? new Version(0, 0))
+                .ThenByDescending(x => x.Created ?? DateTimeOffset.MinValue)
+                .FirstOrDefault();
+
+            var bestAny = images
+                .Select(i => new
+                {
+                    Image = i,
+                    Kernel = TryParseKernelVersion(i.Name),
+                    Created = TryParseCreationDate(i.CreationDate)
+                })
+                .OrderByDescending(x => x.Kernel ?? new Version(0, 0))
+                .ThenByDescending(x => x.Created ?? DateTimeOffset.MinValue)
+                .FirstOrDefault();
+
+            var selected = bestStandard ?? bestNonMinimal ?? bestAny;
+
+            if (selected?.Image == null)
                 throw new InvalidOperationException("No Amazon Linux 2023 ARM64 AMI found");
 
-            _logger.Information("Using AMI {AmiId} ({Name})", latestAmi.ImageId, latestAmi.Name);
-            return latestAmi.ImageId;
+            _logger.Information(
+                "Selected AL2023 AMI {AmiId} ({Name}) Kernel={Kernel} Created={Created} [standardCandidates={StandardCount}, totalImages={TotalCount}]",
+                selected.Image.ImageId,
+                selected.Image.Name,
+                selected.Kernel?.ToString() ?? "unknown",
+                selected.Created?.ToString("u") ?? "unknown",
+                standardCandidates.Count,
+                images.Count);
+
+            return selected.Image.ImageId;
+        }
+
+        private static bool IsStandardAmazonLinux2023Ami(Image image)
+        {
+            string name = image?.Name ?? string.Empty;
+            if (!name.StartsWith("al2023-ami-", StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            if (IsMinimalAmazonLinux2023Ami(image))
+                return false;
+
+            if (name.Contains("-ecs-", StringComparison.OrdinalIgnoreCase))
+                return false;
+            if (name.Contains("-nvidia-", StringComparison.OrdinalIgnoreCase))
+                return false;
+            if (name.Contains("-sap-", StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            if (!name.EndsWith("-arm64", StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            if (!name.Contains("-kernel-", StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            return true;
+        }
+
+        private static bool IsMinimalAmazonLinux2023Ami(Image image)
+        {
+            string name = image?.Name ?? string.Empty;
+            return name.Contains("-minimal-", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static Version TryParseKernelVersion(string amiName)
+        {
+            if (string.IsNullOrWhiteSpace(amiName))
+                return null;
+
+            var m = Regex.Match(amiName, @"-kernel-(?<ver>\d+\.\d+(?:\.\d+)?)", RegexOptions.IgnoreCase);
+            if (!m.Success)
+                return null;
+
+            string[] parts = m.Groups["ver"].Value.Split('.');
+            if (parts.Length < 2)
+                return null;
+
+            if (!int.TryParse(parts[0], NumberStyles.None, CultureInfo.InvariantCulture, out int major))
+                return null;
+            if (!int.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out int minor))
+                return null;
+
+            if (parts.Length >= 3 &&
+                int.TryParse(parts[2], NumberStyles.None, CultureInfo.InvariantCulture, out int patch))
+                return new Version(major, minor, patch);
+
+            return new Version(major, minor);
+        }
+
+        private static DateTimeOffset? TryParseCreationDate(string creationDate)
+        {
+            if (string.IsNullOrWhiteSpace(creationDate))
+                return null;
+
+            if (DateTimeOffset.TryParse(creationDate, CultureInfo.InvariantCulture,
+                    DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var dto))
+                return dto;
+
+            return null;
         }
 
         private async Task WaitForInstanceStateAsync(string instanceId, InstanceStateName targetState)

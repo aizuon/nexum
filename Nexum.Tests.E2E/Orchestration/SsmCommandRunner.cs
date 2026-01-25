@@ -52,8 +52,9 @@ namespace Nexum.Tests.E2E.Orchestration
                         return;
                     }
                 }
-                catch (Exception)
+                catch (Exception ex)
                 {
+                    _logger.Debug(ex, "SSM instance information lookup failed; retrying");
                 }
 
                 await Task.Delay(TimeSpan.FromSeconds(10));
@@ -64,6 +65,8 @@ namespace Nexum.Tests.E2E.Orchestration
 
         public async Task<CommandResult> RunCommandAsync(string instanceId, string command, TimeSpan timeout)
         {
+            command = NormalizeShellNewlines(command);
+
             _logger.Information("Running command on {InstanceId}: {Command}", instanceId, command);
 
             var sendResponse = await _ssmClient.SendCommandAsync(new SendCommandRequest
@@ -85,16 +88,18 @@ namespace Nexum.Tests.E2E.Orchestration
 
         public async Task<string> StartBackgroundCommandAsync(string instanceId, string command)
         {
+            command = NormalizeShellNewlines(command);
+
             _logger.Information("Starting background command on {InstanceId}: {Command}", instanceId, command);
 
             string bgCommands = $@"
 cat > /tmp/e2e-start.sh << 'SCRIPT'
-#!/bin/bash
+#!/usr/bin/env bash
 export DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1
 {command}
 SCRIPT
-chmod +x /tmp/e2e-start.sh
-setsid /tmp/e2e-start.sh > /tmp/e2e-output.log 2>&1 < /dev/null &
+
+nohup bash /tmp/e2e-start.sh > /tmp/e2e-output.log 2>&1 < /dev/null &
 PID=$!
 sleep 1
 echo $PID
@@ -118,6 +123,14 @@ echo $PID
                 instanceId, result.StandardOutput?.Trim());
 
             return result.StandardOutput?.Trim();
+        }
+
+        private static string NormalizeShellNewlines(string input)
+        {
+            if (string.IsNullOrEmpty(input))
+                return input;
+
+            return input.Replace("\r\n", "\n").Replace("\r", "\n");
         }
 
         public async Task WaitForPortAsync(string instanceId, string targetHost, int port, string protocol,

@@ -201,7 +201,10 @@ namespace Nexum.Tests.E2E
             return $@"
 set -e
 
-# Create directory and download binaries
+if ! rpm -q libicu >/dev/null 2>&1 && ! rpm -q icu-libs >/dev/null 2>&1; then
+    dnf install -y libicu || dnf install -y icu-libs
+fi
+
 mkdir -p /tmp/e2e
 cd /tmp/e2e
 
