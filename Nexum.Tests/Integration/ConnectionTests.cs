@@ -1,7 +1,8 @@
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Nexum.Core;
+using Nexum.Core.Configuration;
+using Nexum.Core.Serialization;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -71,13 +72,13 @@ namespace Nexum.Tests.Integration
             var clientDone = new ManualResetEventSlim(false);
             const int expectedMessages = 5;
 
-            client.OnRMIReceive += (_, _) =>
+            client.OnRmiReceive += (_, _) =>
             {
                 if (Interlocked.Increment(ref clientReceived) >= expectedMessages)
                     clientDone.Set();
             };
 
-            Server.OnRMIReceive += (_, _, _) =>
+            Server.OnRmiReceive += (_, _, _) =>
             {
                 if (Interlocked.Increment(ref serverReceived) >= expectedMessages)
                     serverDone.Set();

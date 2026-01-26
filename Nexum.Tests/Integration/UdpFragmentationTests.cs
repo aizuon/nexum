@@ -3,7 +3,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Nexum.Core;
+using Nexum.Core.Configuration;
+using Nexum.Core.Serialization;
 using Nexum.Core.Simulation;
 using Xunit;
 using Xunit.Abstractions;
@@ -46,7 +47,7 @@ namespace Nexum.Tests.Integration
             byte[] receivedData = null;
             var messageReceived = new ManualResetEventSlim(false);
 
-            Server.OnRMIReceive += (_, msg, _) =>
+            Server.OnRmiReceive += (_, msg, _) =>
             {
                 var receivedPayload = new ByteArray();
                 msg.Read(ref receivedPayload);
@@ -91,7 +92,7 @@ namespace Nexum.Tests.Integration
             var serverReceived = new ManualResetEventSlim(false);
             var clientReceived = new ManualResetEventSlim(false);
 
-            Server.OnRMIReceive += (_, msg, _) =>
+            Server.OnRmiReceive += (_, msg, _) =>
             {
                 var receivedPayload = new ByteArray();
                 msg.Read(ref receivedPayload);
@@ -99,7 +100,7 @@ namespace Nexum.Tests.Integration
                 serverReceived.Set();
             };
 
-            client.OnRMIReceive += (msg, _) =>
+            client.OnRmiReceive += (msg, _) =>
             {
                 var receivedPayload = new ByteArray();
                 msg.Read(ref receivedPayload);
@@ -168,7 +169,7 @@ namespace Nexum.Tests.Integration
             byte[] receivedData = null;
             var messageReceived = new ManualResetEventSlim(false);
 
-            client2.OnRMIReceive += (msg, _) =>
+            client2.OnRmiReceive += (msg, _) =>
             {
                 var receivedPayload = new ByteArray();
                 msg.Read(ref receivedPayload);
@@ -223,7 +224,7 @@ namespace Nexum.Tests.Integration
             byte[] receivedData = null;
             var messageReceived = new ManualResetEventSlim(false);
 
-            client2.OnRMIReceive += (msg, _) =>
+            client2.OnRmiReceive += (msg, _) =>
             {
                 var receivedPayload = new ByteArray();
                 msg.Read(ref receivedPayload);

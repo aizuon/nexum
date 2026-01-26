@@ -1,20 +1,15 @@
 using System;
 using System.Net;
 using System.Security.Cryptography;
-using System.Text;
 using System.Threading.Tasks;
 using DotNetty.Transport.Channels;
+using Nexum.Core.Configuration;
 using Serilog;
 
 namespace Nexum.Core
 {
     public abstract class NetCore : IDisposable
     {
-        static NetCore()
-        {
-            Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
-        }
-
         public ILogger Logger { get; protected set; }
 
         public string ServerName { get; protected set; }

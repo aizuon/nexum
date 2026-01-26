@@ -1,7 +1,8 @@
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Nexum.Core;
+using Nexum.Core.Configuration;
+using Nexum.Core.Serialization;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -71,7 +72,7 @@ namespace Nexum.Tests.Integration
             int fastReceived = 0;
             var allReceived = new CountdownEvent(2);
 
-            Server.OnRMIReceive += (_, message, rmiId) =>
+            Server.OnRmiReceive += (_, message, rmiId) =>
             {
                 message.Read(out int value);
                 switch (rmiId)

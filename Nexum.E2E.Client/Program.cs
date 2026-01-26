@@ -3,8 +3,10 @@ using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
 using BaseLib;
-using Nexum.Client;
-using Nexum.Core;
+using BaseLib.Logging;
+using Nexum.Client.Core;
+using Nexum.Client.P2P;
+using Nexum.Core.Serialization;
 using Nexum.E2E.Common;
 using Serilog;
 
@@ -128,7 +130,7 @@ namespace Nexum.E2E.Client
                 ConnectionComplete.Set();
             };
 
-            _client.OnRMIReceive += (message, rmiId) => { HandleRmi(message, rmiId); };
+            _client.OnRmiReceive += (message, rmiId) => { HandleRmi(message, rmiId); };
         }
 
         private static void HandleRmi(NetMessage message, ushort rmiId)

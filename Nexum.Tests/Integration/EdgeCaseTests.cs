@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Threading.Tasks;
-using Nexum.Client;
+using Nexum.Client.Core;
 using Xunit;
 using Xunit.Abstractions;
 

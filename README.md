@@ -46,11 +46,21 @@ A high-performance networking library for .NET 10 designed for real-time multipl
 - **Optimized Thread Pools** - DotNetty `MultithreadEventLoopGroup` auto-scales to CPU core count
 - **Adaptive Fragmentation** - MTU inferred from incoming fragments for efficient reassembly
 
+### Packet Serialization (Source Generator)
+
+- **Compile-Time Code Generation** - Roslyn source generator automatically creates serialization and deserialization methods
+- **Attribute-Based** - Simple attributes define packet structure and property order
+- **Type-Safe** - Strong typing for packet properties with automatic serialization order
+- **Custom Serializers** - Support for custom serializers for complex or non-standard types
+- **Zero Boilerplate** - No manual serialization code needed for marked packets
+
 ## 📦 Project Structure
 
 ```text
 Nexum/
 ├── BaseLib/                        # Core utilities and extensions
+│   ├── Caching/
+│   │   └── MemoryCache.cs
 │   ├── Extensions/
 │   │   ├── ByteArrayExtensions.cs
 │   │   ├── ConcurrentDictionaryExtensions.cs
@@ -61,94 +71,130 @@ Nexum/
 │   │   ├── SemaphoreSlimExtensions.cs
 │   │   ├── StreamExtensions.cs
 │   │   └── SymmetricAlgorithmExtensions.cs
-│   ├── ContextEnricher.cs
-│   ├── CRC32.cs
-│   ├── Events.cs
-│   ├── Hash.cs
-│   ├── MemoryCache.cs
-│   ├── NonClosingStream.cs
-│   ├── Singleton.cs
-│   ├── TaskLoop.cs
-│   └── ThreadLoop.cs
+│   ├── Hashing/
+│   │   ├── CRC32.cs
+│   │   └── Hash.cs
+│   ├── IO/
+│   │   └── NonClosingStream.cs
+│   ├── Logging/
+│   │   └── ContextEnricher.cs
+│   ├── Patterns/
+│   │   └── Singleton.cs
+│   ├── Threading/
+│   │   ├── TaskLoop.cs
+│   │   └── ThreadLoop.cs
+│   └── Events.cs
+├── Nexum.SourceGen/                # Roslyn source generator for packet serialization
+│   └── NetSerializableGenerator.cs
 ├── Nexum.Core/                     # Shared networking core
-│   ├── DotNetty/Codecs/
-│   │   ├── LengthFieldBasedFrameDecoder.cs
-│   │   ├── NexumFrameDecoder.cs
-│   │   ├── NexumFrameEncoder.cs
-│   │   ├── UdpFrameDecoder.cs
-│   │   └── UdpFrameEncoder.cs
 │   ├── Logging/
 │   │   ├── BurstDuplicateLogFilter.cs
 │   │   └── BurstDuplicateLogger.cs
-│   ├── Nexum/
-│   │   ├── AssembledPacket.cs
-│   │   ├── AssembledPacketError.cs
-│   │   ├── ByteArray.cs
-│   │   ├── CompressedFrameNumbers.cs
-│   │   ├── ConnectionStateChangedEventArgs.cs
-│   │   ├── Constants.cs
-│   │   ├── DefraggingPacket.cs
-│   │   ├── Enums.cs
-│   │   ├── EventLoopScheduler.cs
-│   │   ├── Extensions.cs
-│   │   ├── FilterTag.cs
-│   │   ├── FragHeader.cs
-│   │   ├── FragmentConfig.cs
-│   │   ├── HolepunchConfig.cs
-│   │   ├── HolepunchHelper.cs
-│   │   ├── HostId.cs
-│   │   ├── MtuConfig.cs
-│   │   ├── MtuDiscovery.cs
-│   │   ├── NetConfig.cs
-│   │   ├── NetCore.cs
-│   │   ├── NetCoreHandler.cs
-│   │   ├── NetCrypt.cs
-│   │   ├── NetMessage.cs
-│   │   ├── NetSettings.cs
-│   │   ├── NetUtil.cs
-│   │   ├── NetZip.cs
-│   │   ├── ReliableUdpConfig.cs
-│   │   ├── ReliableUdpFrame.cs
-│   │   ├── ReliableUdpHelper.cs
-│   │   ├── ReliableUdpHost.cs
-│   │   ├── ReliableUdpReceiver.cs
-│   │   ├── ReliableUdpSender.cs
-│   │   ├── SessionConnectionStateChangedEventArgs.cs
-│   │   ├── StreamQueue.cs
-│   │   ├── SysUtil.cs
-│   │   ├── UdpMessage.cs
-│   │   ├── UdpPacketDefragBoard.cs
-│   │   └── UdpPacketFragBoard.cs
-│   ├── Simulation/
-│   │   ├── NetworkProfile.cs
-│   │   ├── NetworkSimulation.cs
-│   │   └── SimulatedUdpChannelHandler.cs
-│   └── RSAHelper.cs
+│   └── Nexum/
+│       ├── Attributes/             # Source generator attributes
+│       │   ├── INetPropertySerializer.cs
+│       │   ├── NetCoreMessageAttribute.cs
+│       │   ├── NetPropertyAttribute.cs
+│       │   ├── NetSerializableAttribute.cs
+│       │   ├── ScalarSerializer.cs
+│       │   ├── StringEndPointSerializer.cs
+│       │   └── UnicodeStringSerializer.cs
+│       ├── Configuration/          # Settings and configuration
+│       │   ├── Constants.cs
+│       │   ├── Enums.cs
+│       │   ├── FragmentConfig.cs
+│       │   ├── HolepunchConfig.cs
+│       │   ├── MtuConfig.cs
+│       │   ├── NetConfig.cs
+│       │   ├── NetSettings.cs
+│       │   └── ReliableUdpConfig.cs
+│       ├── Crypto/                 # Encryption and compression
+│       │   ├── NetCrypt.cs
+│       │   ├── NetZip.cs
+│       │   └── RSAHelper.cs
+│       ├── DotNetty/Codecs/        # DotNetty codec implementations
+│       │   ├── LengthFieldBasedFrameDecoder.cs
+│       │   ├── NexumFrameDecoder.cs
+│       │   ├── NexumFrameEncoder.cs
+│       │   ├── UdpFrameDecoder.cs
+│       │   └── UdpFrameEncoder.cs
+│       ├── Events/                 # Event arguments
+│       │   ├── ConnectionStateChangedEventArgs.cs
+│       │   └── SessionConnectionStateChangedEventArgs.cs
+│       ├── Fragmentation/          # UDP packet fragmentation
+│       │   ├── AssembledPacket.cs
+│       │   ├── AssembledPacketError.cs
+│       │   ├── DefraggingPacket.cs
+│       │   ├── FragHeader.cs
+│       │   ├── UdpPacketDefragBoard.cs
+│       │   └── UdpPacketFragBoard.cs
+│       ├── Holepunching/           # NAT hole punching
+│       │   └── HolepunchHelper.cs
+│       ├── Message/                # Core message packets
+│       ├── Mtu/                    # MTU discovery
+│       │   └── MtuDiscovery.cs
+│       ├── ReliableUdp/            # Reliable UDP implementation
+│       │   ├── CompressedFrameNumbers.cs
+│       │   ├── ReliableUdpFrame.cs
+│       │   ├── ReliableUdpHelper.cs
+│       │   ├── ReliableUdpHost.cs
+│       │   ├── ReliableUdpReceiver.cs
+│       │   ├── ReliableUdpSender.cs
+│       │   └── StreamQueue.cs
+│       ├── Rmi/                    # RMI packets (S2C, C2S, C2C)
+│       ├── Routing/                # Host identification
+│       │   ├── FilterTag.cs
+│       │   └── HostId.cs
+│       ├── Serialization/          # Binary serialization
+│       │   ├── ByteArray.cs
+│       │   └── NetMessage.cs
+│       ├── Simulation/             # Network simulation for testing
+│       │   ├── NetworkProfile.cs
+│       │   ├── NetworkSimulation.cs
+│       │   └── SimulatedUdpChannelHandler.cs
+│       ├── Udp/                    # UDP message types
+│       │   └── UdpMessage.cs
+│       ├── Utilities/              # Helper utilities
+│       │   ├── EventLoopScheduler.cs
+│       │   ├── Extensions.cs
+│       │   ├── NetUtil.cs
+│       │   └── SysUtil.cs
+│       ├── ModuleInit.cs
+│       ├── NetCore.cs
+│       └── NetCoreHandler.cs
 ├── Nexum.Client/                   # Client-side implementation
 │   └── Nexum/
-│       ├── NetClient.cs
-│       ├── NetClientAdapter.cs
-│       ├── NetClientHandler.cs
-│       ├── NetUtil.cs
-│       ├── P2PGroup.cs
-│       ├── P2PMember.cs
-│       ├── RecycledUdpSocket.cs
-│       ├── SysUtil.cs
-│       └── UdpHandler.cs
+│       ├── Core/                   # Client core
+│       │   ├── NetClient.cs
+│       │   ├── NetClientAdapter.cs
+│       │   └── NetClientHandler.cs
+│       ├── P2P/                    # P2P client components
+│       │   ├── P2PGroup.cs
+│       │   └── P2PMember.cs
+│       ├── Udp/                    # UDP handling
+│       │   ├── RecycledUdpSocket.cs
+│       │   └── UdpHandler.cs
+│       └── Utilities/              # Client-specific utilities
+│           ├── NetUtil.cs
+│           └── SysUtil.cs
 ├── Nexum.Server/                   # Server-side implementation
 │   └── Nexum/
-│       ├── ChannelAttributes.cs
-│       ├── HostIdFactory.cs
-│       ├── NetServer.cs
-│       ├── NetServerAdapter.cs
-│       ├── NetServerHandler.cs
-│       ├── NetSession.cs
-│       ├── P2PConnectionState.cs
-│       ├── P2PGroup.cs
-│       ├── P2PMember.cs
-│       ├── SessionHandler.cs
-│       ├── UdpHandler.cs
-│       └── UdpSocket.cs
+│       ├── Core/                   # Server core
+│       │   ├── ChannelAttributes.cs
+│       │   ├── HostIdFactory.cs
+│       │   ├── NetServer.cs
+│       │   ├── NetServerAdapter.cs
+│       │   └── NetServerHandler.cs
+│       ├── P2P/                    # P2P server components
+│       │   ├── P2PConnectionState.cs
+│       │   ├── P2PGroup.cs
+│       │   └── P2PMember.cs
+│       ├── Sessions/               # Session management
+│       │   ├── NetSession.cs
+│       │   └── SessionHandler.cs
+│       └── Udp/                    # UDP handling
+│           ├── UdpHandler.cs
+│           └── UdpSocket.cs
 ├── Nexum.Tests/                    # Unit and integration tests
 │   ├── Integration/
 │   │   ├── ConnectionStateTests.cs
@@ -168,6 +214,7 @@ Nexum/
 │   ├── CRC32Tests.cs
 │   ├── NetCryptTests.cs
 │   ├── NetMessageTests.cs
+│   ├── NetPacketSourceGenTests.cs
 │   └── NetZipTests.cs
 ├── Nexum.Tests.E2E/                # End-to-end AWS tests
 │   ├── Orchestration/
@@ -183,9 +230,9 @@ Nexum/
 │   └── Program.cs
 ├── Nexum.E2E.Common/               # Shared E2E constants
 │   └── E2EConstants.cs
-├── ExampleClient/                  # Example client application
+├── Example.Client/                 # Example client application
 │   └── Program.cs
-└── ExampleServer/                  # Example server application
+└── Example.Server/                 # Example server application
     └── Program.cs
 ```
 
@@ -353,13 +400,137 @@ message.Write("Hello", unicode: true);// string (Unicode)
 
 // Write complex types
 message.Write(Guid.NewGuid());        // Guid
+message.Write(new Version(1, 2, 3, 4)); // Version
 message.Write(new IPEndPoint(IPAddress.Loopback, 8080)); // IPEndPoint
-message.Write(new ByteArray(data));   // byte arrays
+message.Write(new ByteArray(data));   // ByteArray
+message.Write(MyEnum.Value);          // Enums
 
 // Read data
 message.Read(out int value);
 message.Read(out string text);
 message.Read(out Guid guid);
+message.Read(out MyEnum enumValue);
+```
+
+### Data Transfer Objects (DTOs)
+
+Use `[NetSerializable]` to define DTOs with automatic serialization. The source generator creates `Serialize()` and `Deserialize()` methods at compile time:
+
+```csharp
+using Nexum.Core.Attributes;
+
+[NetSerializable]
+public partial class PositionDto
+{
+    [NetProperty(0)]
+    public float X { get; set; }
+
+    [NetProperty(1)]
+    public float Y { get; set; }
+
+    [NetProperty(2)]
+    public float Z { get; set; }
+}
+
+// Serialize
+var dto = new PositionDto { X = 10.5f, Y = 0f, Z = -5.2f };
+var message = dto.Serialize();
+
+// Deserialize
+if (PositionDto.Deserialize(message, out var received))
+{
+    Console.WriteLine($"Position at ({received.X}, {received.Y}, {received.Z})");
+}
+```
+
+### RMI Packets with Source Generator
+
+Use `[NetRmi]` to define RMI packets with automatic ID assignment. The generated `Serialize()` method wraps the packet in an `RmiMessage` with the specified RMI ID:
+
+```csharp
+// Define an enum for your RMI IDs (must use ushort as underlying type)
+public enum GameRmiId : ushort
+{
+    PlayerMove = 1001,
+    PlayerAttack = 1002,
+    ChatMessage = 1003
+}
+
+[NetRmi(GameRmiId.PlayerMove)]
+public partial class PlayerMoveRmi
+{
+    [NetProperty(0)]
+    public uint PlayerId { get; set; }
+
+    [NetProperty(1)]
+    public PositionDto Position { get; set; }
+}
+
+// Server-side: Send RMI to client
+var rmi = new PlayerMoveRmi 
+{ 
+    PlayerId = 1, 
+    Position = new PositionDto { X = 10.5f, Y = 20.3f, Z = 0f }
+};
+session.RmiToClient(rmi);                           // TCP
+session.RmiToClientUdpIfAvailable(rmi);             // UDP if available
+
+// Client-side: Handle incoming RMI
+client.OnRMIReceive += (message, rmiId) =>
+{
+    if (rmiId == (ushort)GameRmiId.PlayerMove &&
+        PlayerMoveRmi.Deserialize(message, out var move))
+    {
+        Console.WriteLine($"Player {move.PlayerId} moved to ({move.Position.X}, {move.Position.Y}, {move.Position.Z})");
+    }
+};
+```
+
+You can also use raw `ushort` values for RMI IDs:
+
+```csharp
+[NetRmi(1001)]
+public partial class PlayerMoveRmi { /* ... */ }
+```
+
+### Custom Serializers
+
+Custom serializers can be specified for complex types:
+
+```csharp
+[NetSerializable]
+public partial class ServerInfo
+{
+    [NetProperty(0, typeof(StringEndPointSerializer))]
+    public IPEndPoint Endpoint { get; set; }
+
+    [NetProperty(1, typeof(UnicodeStringSerializer))]
+    public string ServerName { get; set; }
+}
+```
+
+Implement custom serializers by implementing `INetPropertySerializer<T>`:
+
+```csharp
+public sealed class UnixTimestampSerializer : INetPropertySerializer<DateTime>
+{
+    public static void Serialize(NetMessage msg, DateTime obj)
+    {
+        long unixTime = new DateTimeOffset(obj).ToUnixTimeMilliseconds();
+        msg.Write(unixTime);
+    }
+
+    public static bool Deserialize(NetMessage msg, out DateTime obj)
+    {
+        if (!msg.Read(out long unixTime))
+        {
+            obj = default;
+            return false;
+        }
+        obj = DateTimeOffset.FromUnixTimeMilliseconds(unixTime).UtcDateTime;
+        return true;
+    }
+}
 ```
 
 ## 🔐 Security Architecture
@@ -448,7 +619,6 @@ The client sends `ServerGuid` during the connection handshake, and the server va
 
 The following features are planned or partially implemented:
 
-- [ ] **Code Generation for RMI** - Source generator for type-safe RMI stubs instead of manual `rmiId` handling
 - [ ] **Advanced UDP Congestion Control** - Enhance `ReliableUdpHandler` with TCP-friendly rate control (TFRC) or BBR-style algorithms to prevent packet loss under load
 - [ ] **Super Peer / Host Selection** - Automatically elect the best peer (lowest latency, best connectivity) as host in P2P groups for authoritative state sync
 - [ ] **WiFi/Network Handover** - Seamless reconnection when the client's network changes (e.g., WiFi→mobile), preserving session state and recovering in-flight messages

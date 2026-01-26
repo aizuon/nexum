@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Nexum.Core;
+using Nexum.Core.Serialization;
 using Nexum.Core.Simulation;
 using Xunit;
 using Xunit.Abstractions;
@@ -78,13 +78,13 @@ namespace Nexum.Tests.Integration
             var clientToServerReceived = new ManualResetEventSlim(false);
             var serverToClientReceived = new ManualResetEventSlim(false);
 
-            Server.OnRMIReceive += (_, msg, _) =>
+            Server.OnRmiReceive += (_, msg, _) =>
             {
                 msg.Read(out clientToServerValue);
                 clientToServerReceived.Set();
             };
 
-            client.OnRMIReceive += (msg, _) =>
+            client.OnRmiReceive += (msg, _) =>
             {
                 msg.Read(out serverToClientValue);
                 serverToClientReceived.Set();
@@ -118,7 +118,7 @@ namespace Nexum.Tests.Integration
             int receivedValue = 0;
             var messageReceived = new ManualResetEventSlim(false);
 
-            Server.OnRMIReceive += (_, msg, _) =>
+            Server.OnRmiReceive += (_, msg, _) =>
             {
                 msg.Read(out receivedValue);
                 messageReceived.Set();

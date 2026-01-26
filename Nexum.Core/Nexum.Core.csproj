@@ -9,6 +9,8 @@
         <FileVersion>1.0.0.0</FileVersion>
         <ComVisible>false</ComVisible>
         <Guid>03c32136-28e9-487a-9a14-2cf8c2d549eb</Guid>
+        <EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
+        <CompilerGeneratedFilesOutputPath>$(BaseIntermediateOutputPath)\GeneratedFiles</CompilerGeneratedFilesOutputPath>
     </PropertyGroup>
     <ItemGroup>
         <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
@@ -49,5 +51,16 @@
     </ItemGroup>
     <ItemGroup>
         <ProjectReference Include="..\BaseLib\BaseLib.csproj"/>
+    </ItemGroup>
+    <ItemGroup>
+        <ProjectReference Include="..\Nexum.SourceGen\Nexum.SourceGen.csproj"
+                          OutputItemType="Analyzer" ReferenceOutputAssembly="false"/>
+    </ItemGroup>
+    <ItemGroup>
+        <Folder Include="Nexum\Message\C2C\"/>
+        <Folder Include="Nexum\Message\C2S\"/>
+        <Folder Include="Nexum\Message\S2C\"/>
+        <Folder Include="Nexum\Message\X2X\"/>
+        <Folder Include="Nexum\Rmi\X2X\"/>
     </ItemGroup>
 </Project>

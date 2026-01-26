@@ -1,4 +1,4 @@
-using Nexum.Core;
+using Nexum.Core.Serialization;
 using Xunit;
 
 namespace Nexum.Tests

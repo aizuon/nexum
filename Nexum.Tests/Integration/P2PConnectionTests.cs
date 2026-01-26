@@ -2,12 +2,13 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
-using Nexum.Client;
-using Nexum.Core;
+using Nexum.Client.Core;
+using Nexum.Core.Configuration;
+using Nexum.Core.Serialization;
 using Nexum.Core.Simulation;
 using Xunit;
 using Xunit.Abstractions;
-using P2PGroup = Nexum.Server.P2PGroup;
+using P2PGroup = Nexum.Server.P2P.P2PGroup;
 
 namespace Nexum.Tests.Integration
 {
@@ -152,7 +153,7 @@ namespace Nexum.Tests.Integration
 
             int received = 0;
             var receivedEvent = new ManualResetEventSlim(false);
-            client2.OnRMIReceive += (msg, rmiId) =>
+            client2.OnRmiReceive += (msg, rmiId) =>
             {
                 if (rmiId != 7010)
                     return;
@@ -194,13 +195,13 @@ namespace Nexum.Tests.Integration
             var client1Done = new ManualResetEventSlim(false);
             var client2Done = new ManualResetEventSlim(false);
 
-            client1.OnRMIReceive += (msg, _) =>
+            client1.OnRmiReceive += (msg, _) =>
             {
                 msg.Read(out client1Received);
                 client1Done.Set();
             };
 
-            client2.OnRMIReceive += (msg, _) =>
+            client2.OnRmiReceive += (msg, _) =>
             {
                 msg.Read(out client2Received);
                 client2Done.Set();
@@ -266,13 +267,13 @@ namespace Nexum.Tests.Integration
             var client1Done = new ManualResetEventSlim(false);
             var client2Done = new ManualResetEventSlim(false);
 
-            client1.OnRMIReceive += (msg, _) =>
+            client1.OnRmiReceive += (msg, _) =>
             {
                 msg.Read(out client1Received);
                 client1Done.Set();
             };
 
-            client2.OnRMIReceive += (msg, _) =>
+            client2.OnRmiReceive += (msg, _) =>
             {
                 msg.Read(out client2Received);
                 client2Done.Set();
@@ -383,13 +384,13 @@ namespace Nexum.Tests.Integration
             var client1Done = new ManualResetEventSlim(false);
             var client2Done = new ManualResetEventSlim(false);
 
-            client1.OnRMIReceive += (msg, _) =>
+            client1.OnRmiReceive += (msg, _) =>
             {
                 msg.Read(out client1Received);
                 client1Done.Set();
             };
 
-            client2.OnRMIReceive += (msg, _) =>
+            client2.OnRmiReceive += (msg, _) =>
             {
                 msg.Read(out client2Received);
                 client2Done.Set();

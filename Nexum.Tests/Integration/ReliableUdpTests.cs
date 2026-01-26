@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Nexum.Core;
+using Nexum.Core.Serialization;
 using Nexum.Core.Simulation;
 using Xunit;
 using Xunit.Abstractions;
@@ -51,7 +51,7 @@ namespace Nexum.Tests.Integration
             const int messageCount = 5;
             var allReceived = new CountdownEvent(messageCount);
 
-            Server.OnRMIReceive += (_, msg, _) =>
+            Server.OnRmiReceive += (_, msg, _) =>
             {
                 msg.Read(out int value);
                 receivedValues.Enqueue(value);
@@ -102,13 +102,13 @@ namespace Nexum.Tests.Integration
             var clientToServerReceived = new ManualResetEventSlim(false);
             var serverToClientReceived = new ManualResetEventSlim(false);
 
-            Server.OnRMIReceive += (_, msg, _) =>
+            Server.OnRmiReceive += (_, msg, _) =>
             {
                 msg.Read(out clientToServerValue);
                 clientToServerReceived.Set();
             };
 
-            client.OnRMIReceive += (msg, _) =>
+            client.OnRmiReceive += (msg, _) =>
             {
                 msg.Read(out serverToClientValue);
                 serverToClientReceived.Set();
@@ -169,7 +169,7 @@ namespace Nexum.Tests.Integration
             const int expectedCount = 5;
             var allReceived = new ManualResetEventSlim(false);
 
-            client2.OnRMIReceive += (_, _) =>
+            client2.OnRmiReceive += (_, _) =>
             {
                 if (Interlocked.Increment(ref messageCount) >= expectedCount)
                     allReceived.Set();
@@ -225,7 +225,7 @@ namespace Nexum.Tests.Integration
             int receivedValue = 0;
             var messageReceived = new ManualResetEventSlim(false);
 
-            client2.OnRMIReceive += (msg, _) =>
+            client2.OnRmiReceive += (msg, _) =>
             {
                 msg.Read(out receivedValue);
                 messageReceived.Set();

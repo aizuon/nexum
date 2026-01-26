@@ -1,18 +1,13 @@
 using System;
 using System.Net;
-using System.Text;
-using Nexum.Core;
+using Nexum.Core.Configuration;
+using Nexum.Core.Serialization;
 using Xunit;
 
 namespace Nexum.Tests
 {
     public class NetMessageTests
     {
-        public NetMessageTests()
-        {
-            Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
-        }
-
         [Fact]
         public void Constructor_Default_InitializesProperties()
         {

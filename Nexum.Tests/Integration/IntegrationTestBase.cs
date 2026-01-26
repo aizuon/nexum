@@ -4,15 +4,16 @@ using System.Collections.Generic;
 using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
-using BaseLib;
-using Nexum.Client;
-using Nexum.Core;
+using BaseLib.Logging;
+using Nexum.Client.Core;
+using Nexum.Core.Configuration;
 using Nexum.Core.Simulation;
-using Nexum.Server;
+using Nexum.Server.Core;
+using Nexum.Server.Sessions;
 using Serilog;
 using Xunit;
 using Xunit.Abstractions;
-using ClientP2PMember = Nexum.Client.P2PMember;
+using ClientP2PMember = Nexum.Client.P2P.P2PMember;
 
 namespace Nexum.Tests.Integration
 {

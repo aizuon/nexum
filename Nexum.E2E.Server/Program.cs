@@ -5,9 +5,11 @@ using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
 using BaseLib;
-using Nexum.Core;
+using BaseLib.Logging;
+using Nexum.Core.Serialization;
 using Nexum.E2E.Common;
-using Nexum.Server;
+using Nexum.Server.Core;
+using Nexum.Server.Sessions;
 using Serilog;
 
 namespace Nexum.E2E.Server
@@ -62,7 +64,7 @@ namespace Nexum.E2E.Server
                     Log.Information("Client disconnected: HostId={HostId}", session.HostId);
                 };
 
-                server.OnRMIReceive += (session, message, rmiId) => { HandleRmi(server, session, message, rmiId); };
+                server.OnRmiReceive += (session, message, rmiId) => { HandleRmi(server, session, message, rmiId); };
 
                 var endpoint = new IPEndPoint(IPAddress.Parse(config.BindIp), config.TcpPort);
                 await server.ListenAsync(endpoint, config.UdpPorts);

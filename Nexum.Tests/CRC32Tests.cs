@@ -1,7 +1,7 @@
 using System;
 using System.Buffers.Binary;
 using System.Text;
-using BaseLib;
+using BaseLib.Hashing;
 using Xunit;
 
 namespace Nexum.Tests

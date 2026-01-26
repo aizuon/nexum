@@ -1,4 +1,7 @@
 using System;
+using Nexum.Core.Configuration;
+using Nexum.Core.Crypto;
+using Nexum.Core.Serialization;
 using Serilog;
 
 namespace Nexum.Core

@@ -1,17 +1,13 @@
 using System;
-using System.Text;
-using Nexum.Core;
+using Nexum.Core.Configuration;
+using Nexum.Core.Crypto;
+using Nexum.Core.Serialization;
 using Xunit;
 
 namespace Nexum.Tests
 {
     public class NetZipTests
     {
-        public NetZipTests()
-        {
-            Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
-        }
-
         [Fact]
         public void CompressPacket_CompressesData()
         {

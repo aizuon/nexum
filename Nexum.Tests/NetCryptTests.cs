@@ -1,5 +1,6 @@
 using System;
-using Nexum.Core;
+using Nexum.Core.Configuration;
+using Nexum.Core.Crypto;
 using Xunit;
 
 namespace Nexum.Tests

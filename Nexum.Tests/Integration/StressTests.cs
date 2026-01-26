@@ -3,8 +3,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Nexum.Client;
-using Nexum.Core;
+using Nexum.Client.Core;
+using Nexum.Core.Serialization;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -182,7 +182,7 @@ namespace Nexum.Tests.Integration
                 }
 
                 var receiver = client;
-                client.OnRMIReceive += (msg, rmiId) =>
+                client.OnRmiReceive += (msg, rmiId) =>
                 {
                     if (rmiId != testRmiId)
                         return;
