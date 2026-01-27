@@ -15,7 +15,8 @@ namespace Nexum.Core.Configuration
         internal const int InitialBackoffDelayMs = 2;
         internal const int MaxBackoffDelayMs = 50;
         internal const int MaxSocketWaitAttempts = 25;
-        internal const double UdpSetupRetrySeconds = 8.0;
-        internal const double UdpPingTimeoutSeconds = 15.0;
+        internal const double UdpSetupRetrySeconds = ReliableUdpConfig.FallbackServerUdpToTcpTimeout - 3.0;
+        internal const double P2PSetupRetrySeconds = ReliableUdpConfig.FallbackP2PUdpToTcpTimeout - 3.0;
+        internal const double UdpPingTimeoutSeconds = ReliableUdpConfig.FallbackServerUdpToTcpTimeout;
     }
 }

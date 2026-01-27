@@ -360,7 +360,7 @@ namespace Nexum.Server.Core
 
                 if (!stateToTarget.IsJoined || !stateFromTarget.IsJoined)
                     continue;
-                if (!stateFromTarget.RemotePeer.Session.UdpEnabled)
+                if (!stateToTarget.RemotePeer.Session.UdpEnabled)
                     continue;
 
                 bool shouldInitialize;
@@ -376,6 +376,46 @@ namespace Nexum.Server.Core
                     session.HostId, stateToTarget.RemotePeer.Session.HostId);
 
                 InitializeP2PConnection(session, stateToTarget, stateFromTarget);
+            }
+        }
+
+        internal void ProcessPendingPeerHolepunchRequests(NetSession session)
+        {
+            while (session.PendingPeerHolepunchRequests.TryDequeue(out var request))
+            {
+                if (request.SenderSession.IsDisposed)
+                    continue;
+
+                IPEndPoint capturedSenderUdpEndpoint;
+                lock (request.SenderSession.UdpHolepunchLock)
+                {
+                    if (!request.SenderSession.UdpEnabled)
+                        continue;
+
+                    if (request.SenderSession.UdpSocket?.Channel == null)
+                        continue;
+
+                    var senderUdpEndpoint = request.SenderSession.UdpEndPoint;
+                    if (senderUdpEndpoint == null)
+                        continue;
+                    capturedSenderUdpEndpoint = senderUdpEndpoint;
+                }
+
+                session.Logger.Debug(
+                    "ProcessPendingPeerHolepunchRequests => processing queued request from hostId = {SenderHostId}, magicNumber = {MagicNumber}",
+                    request.SenderSession.HostId,
+                    request.MagicNumber);
+
+                request.SenderSession.NexumToClient(
+                    HolepunchHelper.CreatePeerUdpServerHolepunchAckMessage(request.MagicNumber,
+                        capturedSenderUdpEndpoint,
+                        session.HostId));
+                HolepunchHelper.SendBurstMessages(
+                    () => HolepunchHelper.CreatePeerUdpServerHolepunchAckMessage(request.MagicNumber,
+                        capturedSenderUdpEndpoint,
+                        session.HostId),
+                    msg => request.SenderSession.NexumToClient(msg)
+                );
             }
         }
 
@@ -478,7 +518,7 @@ namespace Nexum.Server.Core
                     if (!stateToTarget.IsJoined || !stateFromTarget.IsJoined)
                         continue;
 
-                    if (!stateFromTarget.RemotePeer.Session.UdpEnabled || !session.UdpEnabled)
+                    if (!stateToTarget.RemotePeer.Session.UdpEnabled || !session.UdpEnabled)
                         continue;
 
                     bool isInitialized = false;
@@ -488,7 +528,7 @@ namespace Nexum.Server.Core
 
                     HolepunchHelper.WithOrderedLocks(
                         session.HostId,
-                        stateFromTarget.RemotePeer.Session.HostId,
+                        stateToTarget.RemotePeer.Session.HostId,
                         stateToTarget.StateLock,
                         stateFromTarget.StateLock,
                         () =>
@@ -499,15 +539,10 @@ namespace Nexum.Server.Core
                                 var diff = now - stateToTarget.LastHolepunch;
                                 int backoffSeconds =
                                     Math.Min(
-                                        (int)HolepunchConfig.UdpSetupRetrySeconds *
+                                        (int)HolepunchConfig.P2PSetupRetrySeconds *
                                         (1 << (int)stateToTarget.RetryCount), 60);
 
                                 if (stateToTarget.HolepunchSuccess)
-                                    return;
-
-                                bool bothHaveProgress = stateToTarget.PeerUdpHolepunchSuccess &&
-                                                        stateFromTarget.PeerUdpHolepunchSuccess;
-                                if (bothHaveProgress)
                                     return;
 
                                 if (diff >= TimeSpan.FromSeconds(backoffSeconds) &&
@@ -521,13 +556,11 @@ namespace Nexum.Server.Core
                                     stateToTarget.NewConnectionSent = stateFromTarget.NewConnectionSent = false;
                                     stateToTarget.EstablishSent = stateFromTarget.EstablishSent = false;
 
-                                    sessionNeedsRenew = !stateToTarget.PeerUdpHolepunchSuccess;
-                                    targetNeedsRenew = !stateFromTarget.PeerUdpHolepunchSuccess;
+                                    sessionNeedsRenew = true;
+                                    targetNeedsRenew = true;
 
-                                    if (sessionNeedsRenew)
-                                        stateToTarget.PeerUdpHolepunchSuccess = false;
-                                    if (targetNeedsRenew)
-                                        stateFromTarget.PeerUdpHolepunchSuccess = false;
+                                    stateToTarget.PeerUdpHolepunchSuccess = false;
+                                    stateFromTarget.PeerUdpHolepunchSuccess = false;
                                     stateToTarget.LastHolepunch = stateFromTarget.LastHolepunch = now;
                                 }
                             }
@@ -546,9 +579,9 @@ namespace Nexum.Server.Core
 
                         if (targetNeedsRenew)
                         {
-                            stateFromTarget.RemotePeer.Session.Logger.Debug(
+                            stateToTarget.RemotePeer.Session.Logger.Debug(
                                 "Trying to reconnect P2P to {TargetHostId} {RetryCount}/{MaxCount}",
-                                session.HostId, stateFromTarget.RetryCount, HolepunchConfig.MaxRetryAttempts);
+                                session.HostId, stateToTarget.RetryCount, HolepunchConfig.MaxRetryAttempts);
                             SendRenewP2PConnectionState(stateToTarget.RemotePeer.Session, session.HostId);
                         }
                     }
@@ -559,7 +592,7 @@ namespace Nexum.Server.Core
 
                         session.Logger.Debug("Initialize P2P with {TargetHostId}",
                             stateToTarget.RemotePeer.Session.HostId);
-                        stateFromTarget.RemotePeer.Session.Logger.Debug("Initialize P2P with {TargetHostId}",
+                        stateToTarget.RemotePeer.Session.Logger.Debug("Initialize P2P with {TargetHostId}",
                             session.HostId);
 
                         InitializeP2PConnection(session, stateToTarget, stateFromTarget);
@@ -587,9 +620,11 @@ namespace Nexum.Server.Core
         private static void InitializeP2PConnection(NetSession session, P2PConnectionState stateToTarget,
             P2PConnectionState stateFromTarget)
         {
+            var targetSession = stateToTarget.RemotePeer.Session;
+
             bool shouldInitialize = HolepunchHelper.WithOrderedLocks(
                 session.HostId,
-                stateFromTarget.RemotePeer.Session.HostId,
+                targetSession.HostId,
                 stateToTarget.StateLock,
                 stateFromTarget.StateLock,
                 () =>
@@ -604,8 +639,6 @@ namespace Nexum.Server.Core
 
             if (!shouldInitialize)
                 return;
-
-            var targetSession = stateToTarget.RemotePeer.Session;
             bool canRecycle = false;
 
             var recycleToTarget = default(P2PRecycleInfo);
@@ -658,7 +691,6 @@ namespace Nexum.Server.Core
                     targetSession.UdpEndPoint,
                     recycleToTarget.SendAddr,
                     recycleToTarget.RecvAddr);
-
                 SendP2PRecycleComplete(
                     targetSession,
                     session.HostId,

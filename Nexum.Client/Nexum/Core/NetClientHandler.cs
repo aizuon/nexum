@@ -841,12 +841,12 @@ namespace Nexum.Client.Core
                 {
                     Task.Run(async () =>
                     {
+                        bool localPortReuseSuccess = false;
                         await using (await newMember.P2PMutex.EnterAsync())
                         {
                             try
                             {
                                 int? targetPort = bindPort > 0 ? bindPort : null;
-                                bool localPortReuseSuccess = false;
 
                                 if (newMember.IsClosed || newMember.PeerUdpChannel != null)
                                 {
@@ -874,14 +874,6 @@ namespace Nexum.Client.Core
                                 client.Logger.Debug(
                                     "ProcessP2PGroupMemberJoin => created P2P UDP socket for hostId = {HostId}, port = {Port}, localPortReuseSuccess = {LocalPortReuseSuccess}",
                                     hostId, port, localPortReuseSuccess);
-
-                                client.RmiToServer(new P2PGroupMemberJoinAck
-                                {
-                                    GroupHostId = groupHostId,
-                                    AddedMemberHostId = hostId,
-                                    EventId = eventId,
-                                    LocalPortReuseSuccess = localPortReuseSuccess
-                                });
                             }
                             catch (Exception ex)
                             {
@@ -889,6 +881,14 @@ namespace Nexum.Client.Core
                                     "ProcessP2PGroupMemberJoin => failed to create P2P UDP socket for hostId = {HostId}",
                                     hostId);
                             }
+
+                            client.RmiToServer(new P2PGroupMemberJoinAck
+                            {
+                                GroupHostId = groupHostId,
+                                AddedMemberHostId = hostId,
+                                EventId = eventId,
+                                LocalPortReuseSuccess = localPortReuseSuccess
+                            });
                         }
                     });
                 }
@@ -1004,6 +1004,7 @@ namespace Nexum.Client.Core
                         catch (Exception ex)
                         {
                             client.Logger.Error(ex, "S2C_RequestCreateUdpSocket => failed to create UDP socket");
+                            client.RmiToServer(new C2SCreateUdpSocketAck { Success = false });
                         }
                     });
 

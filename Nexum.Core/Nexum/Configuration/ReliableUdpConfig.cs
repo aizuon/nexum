@@ -46,9 +46,9 @@ namespace Nexum.Core.Configuration
 
         internal const double P2PTimeSyncInterval = UdpPingInterval;
 
-        internal const double FallbackServerUdpToTcpTimeout = CsPingInterval * 4.0;
+        internal const double FallbackServerUdpToTcpTimeout = CsPingInterval * 5.0 + 1.0;
 
-        internal const double FallbackP2PUdpToTcpTimeout = P2PPingInterval * 4.0;
+        internal const double FallbackP2PUdpToTcpTimeout = P2PPingInterval * 5.0 + 1.0;
 
         internal const int ServerUdpRepunchMaxTrialCount = 3;
 

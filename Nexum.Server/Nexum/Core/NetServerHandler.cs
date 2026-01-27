@@ -393,49 +393,8 @@ namespace Nexum.Server.Core
                 HolepunchConfig.UdpMatchedDelayMs
             );
 
-            ProcessPendingPeerHolepunchRequests(session);
-
+            server.ProcessPendingPeerHolepunchRequests(session);
             server.InitiateP2PConnections(session);
-        }
-
-        private static void ProcessPendingPeerHolepunchRequests(NetSession session)
-        {
-            while (session.PendingPeerHolepunchRequests.TryDequeue(out var request))
-            {
-                if (request.SenderSession.IsDisposed)
-                    continue;
-
-                IPEndPoint capturedSenderUdpEndpoint;
-                lock (request.SenderSession.UdpHolepunchLock)
-                {
-                    if (!request.SenderSession.UdpEnabled)
-                        continue;
-
-                    if (request.SenderSession.UdpSocket?.Channel == null)
-                        continue;
-
-                    var senderUdpEndpoint = request.SenderSession.UdpEndPoint;
-                    if (senderUdpEndpoint == null)
-                        continue;
-                    capturedSenderUdpEndpoint = senderUdpEndpoint;
-                }
-
-                session.Logger.Debug(
-                    "ProcessPendingPeerHolepunchRequests => processing queued request from hostId = {SenderHostId}, magicNumber = {MagicNumber}",
-                    request.SenderSession.HostId,
-                    request.MagicNumber);
-
-                request.SenderSession.NexumToClient(
-                    HolepunchHelper.CreatePeerUdpServerHolepunchAckMessage(request.MagicNumber,
-                        capturedSenderUdpEndpoint,
-                        session.HostId));
-                HolepunchHelper.SendBurstMessages(
-                    () => HolepunchHelper.CreatePeerUdpServerHolepunchAckMessage(request.MagicNumber,
-                        capturedSenderUdpEndpoint,
-                        session.HostId),
-                    msg => request.SenderSession.NexumToClient(msg)
-                );
-            }
         }
 
         private static void PeerUdpServerHolepunchHandler(NetServer server, NetSession session, NetMessage message,
@@ -720,7 +679,7 @@ namespace Nexum.Server.Core
                                 stateB.LastSuccessfulLocalPort = stateB.LocalEndPoint?.Port ?? 0;
                             }
 
-                            bool canSend = (stateA.HolepunchSuccess || stateB.HolepunchSuccess) &&
+                            bool canSend = stateA.HolepunchSuccess && stateB.HolepunchSuccess &&
                                            !stateA.EstablishSent;
                             if (canSend)
                             {
@@ -792,7 +751,7 @@ namespace Nexum.Server.Core
                             else
                                 stateB.JitTriggered = true;
 
-                            bool canSend = (stateA.JitTriggered || stateB.JitTriggered) &&
+                            bool canSend = stateA.JitTriggered && stateB.JitTriggered &&
                                            !stateA.NewConnectionSent;
                             if (canSend)
                             {

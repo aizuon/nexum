@@ -267,7 +267,7 @@ var serverGuid = new Guid("a43a97d1-9ec7-495e-ad5f-8fe45fde1151");
 var server = new NetServer(serverName, serverGuid);
 
 // Handle incoming RMI messages
-server.OnRMIReceive += (session, message, rmiId) =>
+server.OnRmiReceive += (session, message, rmiId) =>
 {
     switch (rmiId)
     {
@@ -315,7 +315,7 @@ client.OnConnectionComplete += () =>
 };
 
 // Handle incoming RMI messages
-client.OnRMIReceive += (message, rmiId) =>
+client.OnRmiReceive += (message, rmiId) =>
 {
     message.Read(out int result);
     Console.WriteLine($"Received response: {result}");
@@ -476,7 +476,7 @@ session.RmiToClient(rmi);                           // TCP
 session.RmiToClientUdpIfAvailable(rmi);             // UDP if available
 
 // Client-side: Handle incoming RMI
-client.OnRMIReceive += (message, rmiId) =>
+client.OnRmiReceive += (message, rmiId) =>
 {
     if (rmiId == (ushort)GameRmiId.PlayerMove &&
         PlayerMoveRmi.Deserialize(message, out var move))

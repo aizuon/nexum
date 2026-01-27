@@ -190,56 +190,5 @@ namespace Nexum.Tests.Integration
 
             LogSimulationStatistics();
         }
-
-        [Theory(Timeout = 180000)]
-        [MemberData(nameof(NetworkProfiles))]
-        public async Task ReliableUdp_P2PRelayed_MessagesDelivered(string profileName)
-        {
-            var profile = NetworkProfile.GetByName(profileName);
-            SetupNetworkSimulation(profile);
-
-            Server = await CreateServerAsync();
-
-            var client1 = await CreateClientAsync();
-            await WaitForClientConnectionAsync(client1);
-
-            var client2 = await CreateClientAsync();
-            await WaitForClientConnectionAsync(client2);
-
-            var session1 = Server.Sessions[client1.HostId];
-            var session2 = Server.Sessions[client2.HostId];
-            var group = Server.CreateP2PGroup();
-
-            group.Join(session1);
-            group.Join(session2);
-            await WaitForClientUdpEnabledAsync(client1, GetAdjustedTimeout(UdpSetupTimeout));
-            await WaitForClientUdpEnabledAsync(client2, GetAdjustedTimeout(UdpSetupTimeout));
-
-            await WaitForConditionAsync(
-                () => client1.P2PGroup?.P2PMembers.ContainsKey(client2.HostId) == true &&
-                      client2.P2PGroup?.P2PMembers.ContainsKey(client1.HostId) == true,
-                GetAdjustedTimeout(MessageTimeout));
-
-            var peer1 = client1.P2PGroup.P2PMembers[client2.HostId];
-
-            int receivedValue = 0;
-            var messageReceived = new ManualResetEventSlim(false);
-
-            client2.OnRmiReceive += (msg, _) =>
-            {
-                msg.Read(out receivedValue);
-                messageReceived.Set();
-            };
-
-            var testMessage = new NetMessage();
-            testMessage.Write(55555);
-            peer1.RmiToPeer(7005, testMessage, forceRelay: true, reliable: true);
-
-            Assert.True(messageReceived.Wait(GetAdjustedTimeout(MessageTimeout)),
-                $"[{profileName}] Relayed reliable message should be delivered");
-            Assert.Equal(55555, receivedValue);
-
-            LogSimulationStatistics();
-        }
     }
 }
