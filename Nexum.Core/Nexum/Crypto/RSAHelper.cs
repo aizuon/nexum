@@ -6,7 +6,7 @@ namespace Nexum.Core.Crypto
 {
     internal static class RSAHelper
     {
-        internal static RSACryptoServiceProvider CreateRsaProviderFromPublicKey(string publicKey)
+        internal static RSA CreateRsaFromPublicKey(string publicKey)
         {
             byte[] publicKeyBytes = Convert.FromBase64String(publicKey);
 
@@ -18,7 +18,7 @@ namespace Nexum.Core.Crypto
                 Modulus = ((DerInteger)seq[0]).Value.ToByteArrayUnsigned()
             };
 
-            var rsa = new RSACryptoServiceProvider();
+            var rsa = RSA.Create();
             rsa.ImportParameters(parameters);
 
             return rsa;

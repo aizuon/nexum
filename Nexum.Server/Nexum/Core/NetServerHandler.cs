@@ -1,5 +1,6 @@
 using System;
 using System.Net;
+using System.Security.Cryptography;
 using BaseLib.Extensions;
 using Nexum.Core;
 using Nexum.Core.Configuration;
@@ -171,7 +172,8 @@ namespace Nexum.Server.Core
             if (!NotifyCSEncryptedSessionKey.Deserialize(message, out var packet))
                 return;
 
-            byte[] decryptedSessionKey = server.RSA.Decrypt(packet.EncryptedSessionKey.GetBuffer(), true);
+            byte[] decryptedSessionKey =
+                server.RSA.Decrypt(packet.EncryptedSessionKey.GetBuffer(), RSAEncryptionPadding.OaepSHA256);
 
             session.Crypt = new NetCrypt(decryptedSessionKey);
             session.Crypt.InitializeFastEncryption(

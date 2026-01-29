@@ -1539,12 +1539,13 @@ namespace Nexum.Client.Core
                 Modulus = ((DerInteger)rsaSequence[0]).Value.ToByteArrayUnsigned()
             };
 
-            client.RSA = new RSACryptoServiceProvider(2048);
+            client.RSA = RSA.Create();
             client.RSA.ImportParameters(rsaParameters);
 
             client.NexumToServer(new NotifyCSEncryptedSessionKey
             {
-                EncryptedSessionKey = new ByteArray(client.RSA.Encrypt(client.Crypt.GetKey(), true), true),
+                EncryptedSessionKey =
+                    new ByteArray(client.RSA.Encrypt(client.Crypt.GetKey(), RSAEncryptionPadding.OaepSHA256), true),
                 EncryptedFastSessionKey = new ByteArray(client.Crypt.EncryptKey(client.Crypt.GetFastKey()), true)
             });
         }

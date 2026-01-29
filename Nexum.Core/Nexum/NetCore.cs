@@ -20,7 +20,7 @@ namespace Nexum.Core
 
         internal NetSettings NetSettings { get; set; }
 
-        internal RSACryptoServiceProvider RSA { get; set; }
+        internal RSA RSA { get; set; }
 
         internal IPAddress LocalIP => ((IPEndPoint)Channel.LocalAddress).Address.MapToIPv4();
 

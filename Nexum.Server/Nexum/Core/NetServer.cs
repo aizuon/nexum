@@ -71,7 +71,7 @@ namespace Nexum.Server.Core
             ServerGuid = serverGuid;
 
             Logger = Log.ForContext(SerilogConstants.SourceContextPropertyName, $"{ServerName}Server");
-            RSA = new RSACryptoServiceProvider(2048);
+            RSA = RSA.Create(2048);
             NetSettings = netSettings ?? new NetSettings();
             AllowDirectP2P = allowDirectP2P;
         }
@@ -117,7 +117,7 @@ namespace Nexum.Server.Core
             if (string.IsNullOrWhiteSpace(xmlString))
                 throw new ArgumentNullException(nameof(xmlString));
 
-            var newRsa = new RSACryptoServiceProvider(2048);
+            var newRsa = RSA.Create(2048);
             newRsa.FromXmlString(xmlString);
 
             RSA?.Dispose();
@@ -128,7 +128,7 @@ namespace Nexum.Server.Core
 
         public void ImportRsaKey(RSAParameters parameters)
         {
-            var newRsa = new RSACryptoServiceProvider(2048);
+            var newRsa = RSA.Create(2048);
             newRsa.ImportParameters(parameters);
 
             RSA?.Dispose();
@@ -142,7 +142,7 @@ namespace Nexum.Server.Core
             if (privateKey == null || privateKey.Length == 0)
                 throw new ArgumentNullException(nameof(privateKey));
 
-            var newRsa = new RSACryptoServiceProvider(2048);
+            var newRsa = RSA.Create(2048);
 
             try
             {
@@ -164,7 +164,7 @@ namespace Nexum.Server.Core
             if (string.IsNullOrWhiteSpace(pemString))
                 throw new ArgumentNullException(nameof(pemString));
 
-            var newRsa = new RSACryptoServiceProvider(2048);
+            var newRsa = RSA.Create(2048);
             newRsa.ImportFromPem(pemString.AsSpan());
 
             RSA?.Dispose();
