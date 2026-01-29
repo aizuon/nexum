@@ -490,6 +490,19 @@ namespace Nexum.Server.Core
 
                             MagicNumberSessions.TryRemove(session.HolepunchMagicNumber, out _);
 
+                            lock (session.UdpInitLock)
+                            {
+                                if (session.UdpSessionInitialized)
+                                {
+                                    session.UdpSessionInitialized = false;
+                                    session.UdpEndPointInternal = null;
+                                }
+                            }
+
+                            UdpSessions.TryRemove(
+                                FilterTag.Create(session.HostId, (uint)HostId.Server),
+                                out _);
+
                             session.Logger.Debug("Retrying UDP setup for {HostId} (last attempt {Seconds}s ago)",
                                 session.HostId, (int)timeSinceSetupAttempt.TotalSeconds);
 

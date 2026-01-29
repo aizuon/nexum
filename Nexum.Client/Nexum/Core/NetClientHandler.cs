@@ -285,6 +285,7 @@ namespace Nexum.Client.Core
                 if (client.UdpEnabled)
                     return;
 
+                client.SelfUdpSocket = null;
                 client.UdpMagicNumber = packet.MagicNumber;
             }
 
@@ -405,7 +406,7 @@ namespace Nexum.Client.Core
                 HolepunchHelper.SendBurstMessagesWithCheck(
                     () => HolepunchHelper.CreatePeerUdpServerHolepunchMessage(magicNumber, hostId),
                     msg => client.NexumToServerUdpIfAvailable(msg, true),
-                    () => capturedMember.PeerUdpChannel == null && !capturedMember.IsClosed
+                    () => !capturedMember.DirectP2P && !capturedMember.IsClosed
                 );
             }
         }
@@ -932,14 +933,15 @@ namespace Nexum.Client.Core
                         client.P2PGroup.P2PMembersInternal.TryRemove(packet.HostId, out var p2pMember);
                         if (p2pMember != null)
                         {
+                            p2pMember.Close(p2pMember.DirectP2P);
+
                             if (p2pMember.DirectP2P)
                                 client.OnP2PMemberDirectDisconnected(packet.HostId);
                             else
                                 client.OnP2PMemberRelayDisconnected(packet.HostId);
-                            p2pMember.Close(p2pMember.DirectP2P);
-                        }
 
-                        client.OnP2PMemberLeave(packet.HostId);
+                            client.OnP2PMemberLeave(packet.HostId);
+                        }
                     }
 
                     break;
@@ -1183,7 +1185,7 @@ namespace Nexum.Client.Core
                     HolepunchHelper.SendBurstMessagesWithCheck(
                         () => HolepunchHelper.CreatePeerUdpServerHolepunchMessage(magicNumber, capturedHostId),
                         burstMsg => client.NexumToServerUdpIfAvailable(burstMsg, true),
-                        () => capturedMember.PeerUdpChannel == null && !capturedMember.IsClosed
+                        () => !capturedMember.DirectP2P && !capturedMember.IsClosed
                     );
                     break;
                 }
