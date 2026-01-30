@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
@@ -19,7 +18,6 @@ using Nexum.Core.Configuration;
 using Nexum.Core.Crypto;
 using Nexum.Core.DotNetty.Codecs;
 using Nexum.Core.Events;
-using Nexum.Core.Fragmentation;
 using Nexum.Core.Message.X2X;
 using Nexum.Core.Mtu;
 using Nexum.Core.ReliableUdp;
@@ -27,6 +25,7 @@ using Nexum.Core.Rmi.C2S;
 using Nexum.Core.Routing;
 using Nexum.Core.Serialization;
 using Nexum.Core.Simulation;
+using Nexum.Core.Udp;
 using Nexum.Core.Utilities;
 using Serilog;
 using Constants = Serilog.Core.Constants;
@@ -63,8 +62,6 @@ namespace Nexum.Client.Core
         internal static readonly object ClientsLock = new object();
 
         private readonly object _stateLock = new object();
-
-        private readonly Stopwatch _stopwatch = Stopwatch.StartNew();
 
         internal readonly ConcurrentDictionary<uint, byte> PendingP2PConnections =
             new ConcurrentDictionary<uint, byte>();
@@ -108,6 +105,8 @@ namespace Nexum.Client.Core
 
         internal Guid ServerInstanceGuid;
         internal MtuDiscovery ServerMtuDiscovery;
+
+        internal ReliableUdpHost ServerReliableUdp;
         internal double ServerTimeDiff;
         internal int ServerUdpFallbackCount;
         internal double ServerUdpJitter;
@@ -117,11 +116,8 @@ namespace Nexum.Client.Core
         internal bool ServerUdpRequested;
         internal IPEndPoint ServerUdpSocket;
 
-        internal ReliableUdpHost ToServerReliableUdp;
-
         internal IChannel UdpChannel;
-        internal UdpPacketDefragBoard UdpDefragBoard;
-        internal UdpPacketFragBoard UdpFragBoard;
+
         internal Guid UdpMagicNumber;
 
         public NetClient(string serverName, Guid serverGuid)
@@ -132,8 +128,6 @@ namespace Nexum.Client.Core
                 Log.ForContext(Constants.SourceContextPropertyName, $"{ServerName}Client"));
 
             ServerMtuDiscovery = new MtuDiscovery();
-            UdpFragBoard = new UdpPacketFragBoard { MtuDiscovery = ServerMtuDiscovery };
-            UdpDefragBoard = new UdpPacketDefragBoard();
 
             lock (ClientsLock)
             {
@@ -202,12 +196,6 @@ namespace Nexum.Client.Core
         {
             PinnedServerPublicKey = null;
             Logger.Verbose("Server public key pinning disabled");
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public double GetAbsoluteTime()
-        {
-            return _stopwatch.Elapsed.TotalSeconds;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -381,10 +369,10 @@ namespace Nexum.Client.Core
             _recycleGarbageCollectScheduler?.Stop();
             _recycleGarbageCollectScheduler = null;
 
-            if (ToServerReliableUdp != null)
+            if (ServerReliableUdp != null)
             {
-                ToServerReliableUdp.OnFailed -= OnToServerReliableUdpFailed;
-                ToServerReliableUdp = null;
+                ServerReliableUdp.OnFailed -= OnServerReliableUdpFailed;
+                ServerReliableUdp = null;
             }
 
             foreach (var member in P2PGroup?.P2PMembersInternal.Values ?? Enumerable.Empty<P2PMember>())
@@ -482,6 +470,8 @@ namespace Nexum.Client.Core
 
             async Task<IChannel> BindAsync(int port)
             {
+                var defragDecoder = new UdpDefragmentationDecoder(this, NetConfig.MessageMaxLength);
+
                 return await new Bootstrap()
                     .Group(EventLoopGroup)
                     .ChannelFactory(() => new SocketDatagramChannel(AddressFamily.InterNetwork))
@@ -500,7 +490,10 @@ namespace Nexum.Client.Core
 
                         ch.Pipeline
                             .AddLast(new UdpFrameDecoder(NetConfig.MessageMaxLength))
+                            .AddLast(defragDecoder)
                             .AddLast(new UdpFrameEncoder())
+                            .AddLast(new UdpFragmentationEncoder { DefragDecoder = defragDecoder })
+                            .AddLast(new ReliableUdpCodecHandler())
                             .AddLast(new UdpHandler(this, port));
                     }))
                     .Option(ChannelOption.SoRcvbuf, NetConfig.UdpIssueRecvLength)
@@ -636,10 +629,10 @@ namespace Nexum.Client.Core
             _recycleGarbageCollectScheduler?.Stop();
             _recycleGarbageCollectScheduler = null;
 
-            if (ToServerReliableUdp != null)
+            if (ServerReliableUdp != null)
             {
-                ToServerReliableUdp.OnFailed -= OnToServerReliableUdpFailed;
-                ToServerReliableUdp = null;
+                ServerReliableUdp.OnFailed -= OnServerReliableUdpFailed;
+                ServerReliableUdp = null;
             }
 
             foreach (var recycled in RecycledSockets.Values)
@@ -669,20 +662,20 @@ namespace Nexum.Client.Core
                 Channel?.EventLoop);
         }
 
-        internal void InitializeToServerReliableUdp(uint firstFrameNumber)
+        internal void InitializeServerReliableUdp(uint firstFrameNumber)
         {
-            if (ToServerReliableUdp != null)
+            if (ServerReliableUdp != null)
                 return;
 
-            ToServerReliableUdp = new ReliableUdpHost(firstFrameNumber)
+            ServerReliableUdp = new ReliableUdpHost(firstFrameNumber)
             {
                 GetAbsoluteTime = GetAbsoluteTime,
                 GetRecentPing = () => ServerUdpRecentPing > 0 ? ServerUdpRecentPing : 0.05,
-                SendOneFrameToUdpLayer = SendReliableUdpFrameToServer,
+                SendOneFrameToUdpLayer = ToServerReliableUdp,
                 IsReliableChannel = () => false
             };
 
-            ToServerReliableUdp.OnFailed += OnToServerReliableUdpFailed;
+            ServerReliableUdp.OnFailed += OnServerReliableUdpFailed;
             Logger.Debug("Server reliable UDP initialized with firstFrameNumber = {FirstFrameNumber}",
                 firstFrameNumber);
         }
@@ -792,10 +785,10 @@ namespace Nexum.Client.Core
 
             if ((UdpEnabled || force) && UdpChannel != null && ServerUdpSocket != null)
             {
-                if (reliable && ToServerReliableUdp != null)
+                if (reliable && ServerReliableUdp != null)
                 {
                     byte[] wrappedData = ReliableUdpHelper.WrapPayload(data.GetBufferSpan());
-                    ToServerReliableUdp.Send(wrappedData, wrappedData.Length);
+                    ServerReliableUdp.Send(wrappedData, wrappedData.Length);
                 }
                 else
                 {
@@ -825,34 +818,54 @@ namespace Nexum.Client.Core
 
         private void ToServerUdp(NetMessage message)
         {
-            var channel = UdpChannel;
-            if (channel == null || !channel.Active || ServerUdpSocket == null)
+            if (!TryGetServerUdpChannel(out var channel))
             {
                 Logger.Verbose("UDP Channel not ready, packet dropped");
                 return;
             }
 
-            foreach (var udpMessage in UdpFragBoard.FragmentPacket(message, HostId,
-                         (uint)Nexum.Core.Routing.HostId.Server))
+            var packet = new OutboundUdpPacket
             {
-                udpMessage.EndPoint = ServerUdpSocket;
-                channel.WriteAndFlushAsync(udpMessage);
-            }
+                Content = Unpooled.WrappedBuffer(message.GetBufferUnsafe(), 0, message.Length),
+                EndPoint = ServerUdpSocket,
+                FilterTag = FilterTag.Create(HostId, (uint)Nexum.Core.Routing.HostId.Server),
+                Mtu = ServerMtuDiscovery.ConfirmedMtu
+            };
+            channel.WriteAndFlushAsync(packet);
         }
 
-        private void SendReliableUdpFrameToServer(ReliableUdpFrame frame)
+        private void ToServerReliableUdp(ReliableUdpFrame frame)
         {
-            var msg = ReliableUdpHelper.BuildFrameMessage(frame);
-            ToServerUdp(msg);
+            if (!TryGetServerUdpChannel(out var channel))
+            {
+                Logger.Verbose("UDP Channel not ready, reliable frame dropped");
+                return;
+            }
+
+            var outboundFrame = new OutboundReliableUdpFrame
+            {
+                Frame = frame,
+                DestEndPoint = ServerUdpSocket,
+                FilterTag = FilterTag.Create(HostId, (uint)Nexum.Core.Routing.HostId.Server),
+                Mtu = ServerMtuDiscovery.ConfirmedMtu
+            };
+            channel.WriteAndFlushAsync(outboundFrame);
         }
 
-        private void OnToServerReliableUdpFailed()
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private bool TryGetServerUdpChannel(out IChannel channel)
+        {
+            channel = UdpChannel;
+            return channel != null && channel.Active && ServerUdpSocket != null;
+        }
+
+        private void OnServerReliableUdpFailed()
         {
             Logger.Warning(
-                "ToServerReliableUdp failed after max retries, falling back to TCP and requesting re-holepunch");
+                "ServerReliableUdp failed after max retries, falling back to TCP and requesting re-holepunch");
 
-            ToServerReliableUdp.OnFailed -= OnToServerReliableUdpFailed;
-            ToServerReliableUdp = null;
+            ServerReliableUdp.OnFailed -= OnServerReliableUdpFailed;
+            ServerReliableUdp = null;
 
             UdpEnabled = false;
 
@@ -866,11 +879,8 @@ namespace Nexum.Client.Core
             if (_isDisposed)
                 return;
 
-            double currentTime = GetAbsoluteTime();
-
             UpdateFrameRate(elapsedTime);
-            ToServerReliableUdp?.FrameMove(elapsedTime);
-            UdpDefragBoard.PruneStalePackets(currentTime);
+            ServerReliableUdp?.FrameMove(elapsedTime);
         }
 
         private void UpdateFrameRate(double deltaSeconds)

@@ -15,7 +15,6 @@ using Nexum.Core;
 using Nexum.Core.Configuration;
 using Nexum.Core.DotNetty.Codecs;
 using Nexum.Core.Events;
-using Nexum.Core.Fragmentation;
 using Nexum.Core.Holepunching;
 using Nexum.Core.Message.S2C;
 using Nexum.Core.Message.X2X;
@@ -48,7 +47,6 @@ namespace Nexum.Server.Core
         private static readonly TimeSpan ConnectTimeoutCheckInterval = TimeSpan.FromSeconds(2);
 
         private static readonly IPEndPoint DummyEndPoint = new IPEndPoint(IPAddress.Parse("255.255.255.255"), 65535);
-
 
         private EventLoopScheduler _connectTimeoutScheduler;
         private EventLoopScheduler _retryUdpOrHolepunchScheduler;
@@ -104,10 +102,6 @@ namespace Nexum.Server.Core
         internal ConcurrentDictionary<uint, UdpSocket> UdpSockets { get; } =
             new ConcurrentDictionary<uint, UdpSocket>();
 
-        internal UdpPacketDefragBoard UdpDefragBoard { get; } = new UdpPacketDefragBoard
-        {
-            LocalHostId = (uint)HostId.Server
-        };
 
         internal IPAddress IPAddress { get; private set; }
 

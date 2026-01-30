@@ -41,7 +41,6 @@ namespace Nexum.Server.Sessions
                 hostId, session.RemoteEndPoint, Owner.Sessions.Count);
 
             var config = Owner.NetSettings;
-            session.UdpDefragBoard.MaxMessageLength = config.MessageMaxLength;
 
             byte[] encodedKey;
             lock (Owner.RSALock)

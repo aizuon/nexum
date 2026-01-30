@@ -115,5 +115,30 @@ namespace Nexum.Core.ReliableUdp
 
             return msg.ReadByteArrayAsSpan(out payload);
         }
+
+        internal static void ExtractMessagesFromStream(StreamQueue stream, Action<NetMessage> messageHandler)
+        {
+            if (stream == null || stream.Length == 0)
+                return;
+
+            while (stream.Length > 0)
+            {
+                byte[] streamData = stream.PeekAll();
+                var tempMsg = new NetMessage(streamData, true);
+
+                if (!tempMsg.Read(out ushort magic) || magic != Constants.TcpSplitter)
+                    break;
+
+                var streamPayload = new ByteArray();
+                if (!tempMsg.Read(ref streamPayload))
+                    break;
+
+                int consumedBytes = tempMsg.ReadOffset;
+                stream.PopFront(consumedBytes);
+
+                var innerMessage = new NetMessage(streamPayload);
+                messageHandler(innerMessage);
+            }
+        }
     }
 }

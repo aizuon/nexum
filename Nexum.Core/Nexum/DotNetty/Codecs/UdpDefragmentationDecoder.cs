@@ -4,22 +4,41 @@ using System.Collections.Generic;
 using System.Net;
 using System.Runtime.CompilerServices;
 using System.Threading;
+using BaseLib.Extensions;
+using DotNetty.Codecs;
+using DotNetty.Transport.Channels;
 using Nexum.Core.Configuration;
+using Nexum.Core.Fragmentation;
 using Nexum.Core.Routing;
 using Nexum.Core.Udp;
+using Nexum.Core.Utilities;
+using Serilog;
+using SerilogConstants = Serilog.Core.Constants;
 
-namespace Nexum.Core.Fragmentation
+namespace Nexum.Core.DotNetty.Codecs
 {
-    internal sealed class UdpPacketDefragBoard
+    internal sealed class UdpDefragmentationDecoder : MessageToMessageDecoder<UdpMessage>
     {
+        private static readonly ILogger Logger =
+            Log.ForContext(SerilogConstants.SourceContextPropertyName, nameof(UdpDefragmentationDecoder));
+
         private readonly ConcurrentDictionary<IPEndPoint, ConcurrentDictionary<uint, DefraggingPacket>>
             _defraggingPackets = new ConcurrentDictionary<IPEndPoint, ConcurrentDictionary<uint, DefraggingPacket>>();
 
+        private readonly ITimeSource _owner;
+
+        internal readonly uint MaxMessageLength;
+
         private int _inferredMtu = FragmentConfig.MtuLength;
+        private EventLoopScheduler _pruneScheduler;
+
+        internal UdpDefragmentationDecoder(ITimeSource owner, uint maxMessageLength)
+        {
+            _owner = owner;
+            MaxMessageLength = maxMessageLength;
+        }
 
         internal uint LocalHostId { get; set; } = (uint)HostId.None;
-
-        internal uint MaxMessageLength { get; set; } = NetConfig.MessageMaxLength;
 
         internal int InferredMtu => _inferredMtu;
 
@@ -34,10 +53,54 @@ namespace Nexum.Core.Fragmentation
             }
         }
 
+        public override void ChannelActive(IChannelHandlerContext context)
+        {
+            _pruneScheduler = EventLoopScheduler.StartIfNeeded(
+                _pruneScheduler,
+                TimeSpan.FromSeconds(FragmentConfig.AssembleTimeout / 2),
+                () => PruneStalePackets(_owner.GetAbsoluteTime()),
+                context.Channel.EventLoop);
+            base.ChannelActive(context);
+        }
+
+        public override void ChannelInactive(IChannelHandlerContext context)
+        {
+            _pruneScheduler?.Stop();
+            _pruneScheduler = null;
+            base.ChannelInactive(context);
+        }
+
+        protected override void Decode(IChannelHandlerContext context, UdpMessage message, List<object> output)
+        {
+            double currentTime = _owner.GetAbsoluteTime();
+
+            var result = PushFragment(
+                message,
+                currentTime,
+                out var assembledPacket,
+                out string error);
+
+            switch (result)
+            {
+                case AssembledPacketError.Ok:
+                    output.Add(assembledPacket);
+                    break;
+
+                case AssembledPacketError.Assembling:
+                    break;
+
+                case AssembledPacketError.Error:
+                    Logger.Warning("UDP defragmentation error from {Endpoint}: {Error}",
+                        message.EndPoint.ToIPv4String(), error);
+                    break;
+            }
+
+            message.Content.Release();
+        }
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        internal AssembledPacketError PushFragment(
+        private AssembledPacketError PushFragment(
             UdpMessage message,
-            uint srcHostId,
             double currentTime,
             out AssembledPacket assembledPacket,
             out string error)
@@ -52,6 +115,8 @@ namespace Nexum.Core.Fragmentation
                 error = $"Invalid splitter flag: 0x{splitterFlag:X4}";
                 return AssembledPacketError.Error;
             }
+
+            uint srcHostId = (uint)HostId.None;
 
             if (FilterTag.ShouldFilter(message.FilterTag, srcHostId, LocalHostId))
                 return AssembledPacketError.Assembling;
@@ -89,7 +154,8 @@ namespace Nexum.Core.Fragmentation
                 {
                     Packet = packet,
                     SenderEndPoint = message.EndPoint,
-                    SrcHostId = srcHostId
+                    SrcHostId = srcHostId,
+                    FilterTag = message.FilterTag
                 };
                 return AssembledPacketError.Ok;
             }
@@ -132,7 +198,7 @@ namespace Nexum.Core.Fragmentation
                             return AssembledPacketError.Error;
                         }
 
-                        int fragmentCount = UdpPacketFragBoard.GetFragmentCount(packetLength, mtuLength);
+                        int fragmentCount = GetFragmentCount(packetLength, mtuLength);
 
                         defraggingPacket.InferredMtu = mtuLength;
                         defraggingPacket.TotalFragmentCount = fragmentCount;
@@ -225,7 +291,8 @@ namespace Nexum.Core.Fragmentation
                     {
                         Packet = defraggingPacket,
                         SenderEndPoint = endpoint,
-                        SrcHostId = srcHostId
+                        SrcHostId = srcHostId,
+                        FilterTag = message.FilterTag
                     };
                     return AssembledPacketError.Ok;
                 }
@@ -285,15 +352,17 @@ namespace Nexum.Core.Fragmentation
                     return;
             } while (Interlocked.CompareExchange(ref _inferredMtu, mtu, current) != current);
         }
-    }
 
-    internal readonly struct BufferedFragment
-    {
-        internal readonly byte[] Data;
-
-        internal BufferedFragment(byte[] data)
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static int GetFragmentCount(int payloadLength, int mtuLength)
         {
-            Data = data;
+            if (payloadLength <= 0)
+                return 0;
+
+            if (payloadLength <= mtuLength)
+                return 1;
+
+            return (payloadLength - 1) / mtuLength + 1;
         }
     }
 }

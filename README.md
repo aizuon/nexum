@@ -116,18 +116,18 @@ Nexum/
 │       │   ├── LengthFieldBasedFrameDecoder.cs
 │       │   ├── NexumFrameDecoder.cs
 │       │   ├── NexumFrameEncoder.cs
+│       │   ├── ReliableUdpCodecHandler.cs
+│       │   ├── UdpDefragmentationDecoder.cs
 │       │   ├── UdpFrameDecoder.cs
+│       │   ├── UdpFragmentationEncoder.cs
 │       │   └── UdpFrameEncoder.cs
 │       ├── Events/                 # Event arguments
 │       │   ├── ConnectionStateChangedEventArgs.cs
 │       │   └── SessionConnectionStateChangedEventArgs.cs
-│       ├── Fragmentation/          # UDP packet fragmentation
+│       ├── Fragmentation/          # UDP packet fragmentation types
 │       │   ├── AssembledPacket.cs
 │       │   ├── AssembledPacketError.cs
-│       │   ├── DefraggingPacket.cs
-│       │   ├── FragHeader.cs
-│       │   ├── UdpPacketDefragBoard.cs
-│       │   └── UdpPacketFragBoard.cs
+│       │   └── DefraggingPacket.cs
 │       ├── Holepunching/           # NAT hole punching
 │       │   └── HolepunchHelper.cs
 │       ├── Message/                # Core message packets
@@ -153,12 +153,15 @@ Nexum/
 │       │   ├── NetworkSimulation.cs
 │       │   └── SimulatedUdpChannelHandler.cs
 │       ├── Udp/                    # UDP message types
+│       │   ├── OutboundUdpPacket.cs
+│       │   ├── ReliableUdpMessages.cs
 │       │   └── UdpMessage.cs
 │       ├── Utilities/              # Helper utilities
 │       │   ├── EventLoopScheduler.cs
 │       │   ├── Extensions.cs
 │       │   ├── NetUtil.cs
 │       │   └── SysUtil.cs
+│       ├── ITimeSource.cs
 │       ├── ModuleInit.cs
 │       ├── NetCore.cs
 │       └── NetCoreHandler.cs

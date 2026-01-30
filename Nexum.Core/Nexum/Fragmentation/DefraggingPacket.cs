@@ -17,4 +17,14 @@ namespace Nexum.Core.Fragmentation
 
         internal bool IsComplete => MtuConfirmed && FragmentsReceivedCount == TotalFragmentCount;
     }
+
+    internal readonly struct BufferedFragment
+    {
+        internal readonly byte[] Data;
+
+        internal BufferedFragment(byte[] data)
+        {
+            Data = data;
+        }
+    }
 }

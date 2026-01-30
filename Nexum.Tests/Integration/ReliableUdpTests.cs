@@ -44,7 +44,7 @@ namespace Nexum.Tests.Integration
             await WaitForClientUdpEnabledAsync(client, GetAdjustedTimeout(UdpSetupTimeout));
             await WaitForSessionUdpEnabledAsync(session, GetAdjustedTimeout(UdpSetupTimeout));
             await WaitForConditionAsync(
-                () => client.ToServerReliableUdp != null && session.ToClientReliableUdp != null,
+                () => client.ServerReliableUdp != null && session.ClientReliableUdp != null,
                 GetAdjustedTimeout(ConnectionTimeout));
 
             var receivedValues = new ConcurrentQueue<int>();
@@ -94,7 +94,7 @@ namespace Nexum.Tests.Integration
             await WaitForClientUdpEnabledAsync(client, GetAdjustedTimeout(UdpSetupTimeout));
             await WaitForSessionUdpEnabledAsync(session, GetAdjustedTimeout(UdpSetupTimeout));
             await WaitForConditionAsync(
-                () => client.ToServerReliableUdp != null && session.ToClientReliableUdp != null,
+                () => client.ServerReliableUdp != null && session.ClientReliableUdp != null,
                 GetAdjustedTimeout(ConnectionTimeout));
 
             int clientToServerValue = 0;

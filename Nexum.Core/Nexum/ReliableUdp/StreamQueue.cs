@@ -40,6 +40,11 @@ namespace Nexum.Core.ReliableUdp
 
         public void PushBack(byte[] data, int length)
         {
+            PushBack(data, 0, length);
+        }
+
+        public void PushBack(byte[] data, int offset, int length)
+        {
             if (length <= 0)
                 return;
 
@@ -51,11 +56,11 @@ namespace Nexum.Core.ReliableUdp
 
                 int firstPart = Math.Min(length, _buffer.Length - _tail);
                 if (firstPart > 0)
-                    Buffer.BlockCopy(data, 0, _buffer, _tail, firstPart);
+                    Buffer.BlockCopy(data, offset, _buffer, _tail, firstPart);
 
                 int secondPart = length - firstPart;
                 if (secondPart > 0)
-                    Buffer.BlockCopy(data, firstPart, _buffer, 0, secondPart);
+                    Buffer.BlockCopy(data, offset + firstPart, _buffer, 0, secondPart);
 
                 _tail = (_tail + length) % _buffer.Length;
                 _count += length;

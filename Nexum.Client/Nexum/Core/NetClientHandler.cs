@@ -188,9 +188,9 @@ namespace Nexum.Client.Core
             if ((client.ServerUdpSocket != null && client.ServerUdpSocket.Equals(udpEndPoint)) ||
                 FilterTag.Create((uint)HostId.Server, client.HostId) == filterTag)
             {
-                if (client.ToServerReliableUdp != null)
+                if (client.ServerReliableUdp != null)
                 {
-                    client.ToServerReliableUdp.TakeReceivedFrame(frame);
+                    client.ServerReliableUdp.TakeReceivedFrame(frame);
                     ExtractMessagesFromServerReliableUdpStream(client, filterTag, udpEndPoint);
                 }
                 else
@@ -223,28 +223,9 @@ namespace Nexum.Client.Core
         private static void ExtractMessagesFromServerReliableUdpStream(NetClient client, ushort filterTag,
             IPEndPoint udpEndPoint)
         {
-            var stream = client.ToServerReliableUdp?.ReceivedStream;
-            if (stream == null || stream.Length == 0)
-                return;
-
-            while (stream.Length > 0)
-            {
-                byte[] streamData = stream.PeekAll();
-                var tempMsg = new NetMessage(streamData, true);
-
-                if (!tempMsg.Read(out ushort magic) || magic != Constants.TcpSplitter)
-                    break;
-
-                var streamPayload = new ByteArray();
-                if (!tempMsg.Read(ref streamPayload))
-                    break;
-
-                int consumedBytes = tempMsg.ReadOffset;
-                stream.PopFront(consumedBytes);
-
-                var innerMessage = new NetMessage(streamPayload);
-                ReadMessage(client, innerMessage, filterTag, udpEndPoint);
-            }
+            var stream = client.ServerReliableUdp?.ReceivedStream;
+            ReliableUdpHelper.ExtractMessagesFromStream(stream,
+                msg => ReadMessage(client, msg, filterTag, udpEndPoint));
         }
 
         private static void ExtractMessagesFromP2PReliableUdpStream(NetClient client, P2PMember member,
@@ -252,27 +233,8 @@ namespace Nexum.Client.Core
             IPEndPoint udpEndPoint)
         {
             var stream = member.ToPeerReliableUdp?.ReceivedStream;
-            if (stream == null || stream.Length == 0)
-                return;
-
-            while (stream.Length > 0)
-            {
-                byte[] streamData = stream.PeekAll();
-                var tempMsg = new NetMessage(streamData, true);
-
-                if (!tempMsg.Read(out ushort magic) || magic != Constants.TcpSplitter)
-                    break;
-
-                var streamPayload = new ByteArray();
-                if (!tempMsg.Read(ref streamPayload))
-                    break;
-
-                int consumedBytes = tempMsg.ReadOffset;
-                stream.PopFront(consumedBytes);
-
-                var innerMessage = new NetMessage(streamPayload);
-                ReadMessage(client, innerMessage, filterTag, udpEndPoint);
-            }
+            ReliableUdpHelper.ExtractMessagesFromStream(stream,
+                msg => ReadMessage(client, msg, filterTag, udpEndPoint));
         }
 
         private static void RequestStartServerHolepunchHandler(NetClient client, NetMessage message)
@@ -363,7 +325,7 @@ namespace Nexum.Client.Core
                 client.ServerUdpLastReceivedTime = client.GetAbsoluteTime();
             }
 
-            client.InitializeToServerReliableUdp(client.P2PFirstFrameNumber);
+            client.InitializeServerReliableUdp(client.P2PFirstFrameNumber);
             client.StartReliableUdpLoop();
             client.StartUnreliablePingLoop();
 
@@ -829,9 +791,6 @@ namespace Nexum.Client.Core
                 }
 
                 newMember.InitializeReliableUdp(client.P2PFirstFrameNumber, p2pFirstFrameNumber);
-
-                newMember.UdpDefragBoard.MaxMessageLength =
-                    client.NetSettings?.MessageMaxLength ?? NetConfig.MessageMaxLength;
 
                 client.P2PGroup.P2PMembersInternal.TryAdd(hostId, newMember);
                 client.OnP2PMemberJoin(hostId);
@@ -1533,7 +1492,6 @@ namespace Nexum.Client.Core
             };
 
             client.NetSettings = settings;
-            client.UdpDefragBoard.MaxMessageLength = settings.MessageMaxLength;
 
             client.Crypt = new NetCrypt(settings.EncryptedMessageKeyLength, settings.FastEncryptedMessageKeyLength);
 
@@ -1593,7 +1551,6 @@ namespace Nexum.Client.Core
                 packet.HostId, packet.ServerInstanceGuid, packet.ServerEndPoint);
 
             client.HostId = packet.HostId;
-            client.UdpDefragBoard.LocalHostId = packet.HostId;
             client.ServerInstanceGuid = packet.ServerInstanceGuid;
             client.UpdateLoggerContext($"{client.ServerName}Client({packet.HostId})");
             client.Channel.Pipeline.Get<NetClientAdapter>()

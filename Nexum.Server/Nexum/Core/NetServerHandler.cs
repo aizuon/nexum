@@ -121,9 +121,9 @@ namespace Nexum.Server.Core
             if (!ReliableUdpHelper.ParseFrame(message, out var frame))
                 return;
 
-            if (session.ToClientReliableUdp != null)
+            if (session.ClientReliableUdp != null)
             {
-                session.ToClientReliableUdp.TakeReceivedFrame(frame);
+                session.ClientReliableUdp.TakeReceivedFrame(frame);
 
                 ExtractMessagesFromReliableUdpStream(server, session, udpEndPoint);
             }
@@ -141,28 +141,9 @@ namespace Nexum.Server.Core
         private static void ExtractMessagesFromReliableUdpStream(NetServer server, NetSession session,
             IPEndPoint udpEndPoint)
         {
-            var stream = session.ToClientReliableUdp?.ReceivedStream;
-            if (stream == null || stream.Length == 0)
-                return;
-
-            while (stream.Length > 0)
-            {
-                byte[] streamData = stream.PeekAll();
-                var tempMsg = new NetMessage(streamData, true);
-
-                if (!tempMsg.Read(out ushort magic) || magic != Constants.TcpSplitter)
-                    break;
-
-                var streamPayload = new ByteArray();
-                if (!tempMsg.Read(ref streamPayload))
-                    break;
-
-                int consumedBytes = tempMsg.ReadOffset;
-                stream.PopFront(consumedBytes);
-
-                var innerMessage = new NetMessage(streamPayload);
-                ReadMessage(server, session, innerMessage, udpEndPoint);
-            }
+            var stream = session.ClientReliableUdp?.ReceivedStream;
+            ReliableUdpHelper.ExtractMessagesFromStream(stream,
+                msg => ReadMessage(server, session, msg, udpEndPoint));
         }
 
         private static void NotifyCSEncryptedSessionKeyHandler(NetServer server, NetSession session, NetMessage message)
@@ -392,7 +373,7 @@ namespace Nexum.Server.Core
 
             if (session.P2PGroup != null &&
                 session.P2PGroup.P2PMembersInternal.TryGetValue(session.HostId, out var member))
-                session.InitializeToClientReliableUdp(member.P2PFirstFrameNumber);
+                session.InitializeClientReliableUdp(member.P2PFirstFrameNumber);
 
             var notifyUdpMatchedMsg = new NotifyClientServerUdpMatched
             {

@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Net;
 using System.Security.Cryptography;
 using System.Threading.Tasks;
@@ -8,8 +9,9 @@ using Serilog;
 
 namespace Nexum.Core
 {
-    public abstract class NetCore : IDisposable
+    public abstract class NetCore : IDisposable, ITimeSource
     {
+        private readonly Stopwatch _stopwatch = Stopwatch.StartNew();
         internal readonly object RSALock = new object();
 
         public ILogger Logger { get; protected set; }
@@ -32,6 +34,11 @@ namespace Nexum.Core
         {
             RSA?.Dispose();
             RSA = null;
+        }
+
+        public double GetAbsoluteTime()
+        {
+            return _stopwatch.Elapsed.TotalSeconds;
         }
 
         protected Task ScheduleAsync(Action<object, object> action, object context, object state, TimeSpan delay)

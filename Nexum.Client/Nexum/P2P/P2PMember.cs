@@ -4,11 +4,11 @@ using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using BaseLib.Extensions;
+using DotNetty.Buffers;
 using DotNetty.Transport.Channels;
 using Nexum.Client.Core;
 using Nexum.Core.Configuration;
 using Nexum.Core.Crypto;
-using Nexum.Core.Fragmentation;
 using Nexum.Core.Message.C2S;
 using Nexum.Core.Message.DTO;
 using Nexum.Core.Message.X2X;
@@ -16,7 +16,9 @@ using Nexum.Core.Mtu;
 using Nexum.Core.ReliableUdp;
 using Nexum.Core.Rmi.C2C;
 using Nexum.Core.Rmi.C2S;
+using Nexum.Core.Routing;
 using Nexum.Core.Serialization;
+using Nexum.Core.Udp;
 using Nexum.Core.Utilities;
 using Serilog;
 using SerilogConstants = Serilog.Core.Constants;
@@ -30,8 +32,7 @@ namespace Nexum.Client.P2P
         internal readonly NetClient Owner;
 
         public readonly SemaphoreSlim P2PMutex = new SemaphoreSlim(1, 1);
-        internal readonly UdpPacketDefragBoard UdpDefragBoard = new UdpPacketDefragBoard();
-        internal readonly UdpPacketFragBoard UdpFragBoard = new UdpPacketFragBoard();
+
 
         private double _nextPingTime;
         private double _nextTimeSyncTime;
@@ -91,10 +92,6 @@ namespace Nexum.Client.P2P
             HostId = hostId;
             Logger = Log.ForContext("HostId", HostId).ForContext(SerilogConstants.SourceContextPropertyName,
                 $"{owner.ServerName}{nameof(P2PMember)}({HostId})");
-
-            UdpDefragBoard.LocalHostId = owner.HostId;
-            UdpFragBoard.MtuDiscovery = MtuDiscovery;
-            UdpFragBoard.DefragBoard = UdpDefragBoard;
         }
 
         public double Ping => RecentPing;
@@ -260,7 +257,7 @@ namespace Nexum.Client.P2P
                 GetRecentPing = () => RecentPing > 0 ? RecentPing : 0.1,
                 GetUdpSendBufferPacketFilledCount = () => 0,
                 IsReliableChannel = () => !DirectP2P,
-                SendOneFrameToUdpLayer = SendReliableUdpFrame
+                SendOneFrameToUdpLayer = ToPeerReliable
             };
 
             ToPeerReliableUdp.OnFailed += OnReliableUdpFailed;
@@ -280,7 +277,7 @@ namespace Nexum.Client.P2P
                 GetRecentPing = () => RecentPing > 0 ? RecentPing : 0.1,
                 GetUdpSendBufferPacketFilledCount = () => 0,
                 IsReliableChannel = () => !DirectP2P,
-                SendOneFrameToUdpLayer = SendReliableUdpFrame
+                SendOneFrameToUdpLayer = ToPeerReliable
             };
 
             ToPeerReliableUdp.OnFailed += OnReliableUdpFailed;
@@ -314,7 +311,6 @@ namespace Nexum.Client.P2P
 
             double currentTime = Owner.GetAbsoluteTime();
             ToPeerReliableUdp?.FrameMove(elapsedTime);
-            UdpDefragBoard.PruneStalePackets(currentTime);
 
             if (!DirectP2P || PeerLocalToRemoteSocket == null)
                 return;
@@ -404,10 +400,23 @@ namespace Nexum.Client.P2P
             PeerRemoteToLocalSocket = null;
         }
 
-        private void SendReliableUdpFrame(ReliableUdpFrame frame)
+        private void ToPeerReliable(ReliableUdpFrame frame)
         {
-            var msg = ReliableUdpHelper.BuildFrameMessage(frame);
-            NexumToPeer(msg);
+            var dest = PeerLocalToRemoteSocket;
+            if (!TryGetPeerUdpChannel(dest, out var channel))
+            {
+                Logger.Verbose("P2P UDP Channel not ready for hostId = {HostId}, reliable frame dropped", HostId);
+                return;
+            }
+
+            var outboundFrame = new OutboundReliableUdpFrame
+            {
+                Frame = frame,
+                DestEndPoint = dest,
+                FilterTag = FilterTag.Create(Owner.HostId, HostId),
+                Mtu = MtuDiscovery.ConfirmedMtu
+            };
+            channel.WriteAndFlushAsync(outboundFrame);
         }
 
         private void OnReliableUdpFailed()
@@ -477,18 +486,27 @@ namespace Nexum.Client.P2P
         private void ToPeer(NetMessage message, IPEndPoint endPoint = null)
         {
             var dest = PeerLocalToRemoteSocket ?? endPoint;
-            var channel = PeerUdpChannel;
-            if (channel == null || !channel.Active || dest == null)
+            if (!TryGetPeerUdpChannel(dest, out var channel))
             {
                 Logger.Verbose("P2P UDP Channel not ready for hostId = {HostId}, packet dropped", HostId);
                 return;
             }
 
-            foreach (var udpMessage in UdpFragBoard.FragmentPacket(message, Owner.HostId, HostId))
+            var packet = new OutboundUdpPacket
             {
-                udpMessage.EndPoint = dest;
-                channel.WriteAndFlushAsync(udpMessage);
-            }
+                Content = Unpooled.WrappedBuffer(message.GetBufferUnsafe(), 0, message.Length),
+                EndPoint = dest,
+                FilterTag = FilterTag.Create(Owner.HostId, HostId),
+                Mtu = MtuDiscovery.ConfirmedMtu
+            };
+            channel.WriteAndFlushAsync(packet);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private bool TryGetPeerUdpChannel(IPEndPoint dest, out IChannel channel)
+        {
+            channel = PeerUdpChannel;
+            return channel != null && channel.Active && dest != null;
         }
     }
 }

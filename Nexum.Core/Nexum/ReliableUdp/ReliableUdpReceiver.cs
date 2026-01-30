@@ -3,11 +3,16 @@ using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using Nexum.Core.Configuration;
 using Nexum.Core.Utilities;
+using Serilog;
+using SerilogConstants = Serilog.Core.Constants;
 
 namespace Nexum.Core.ReliableUdp
 {
     internal sealed class ReliableUdpReceiver
     {
+        private static readonly ILogger Logger =
+            Log.ForContext(SerilogConstants.SourceContextPropertyName, nameof(ReliableUdpReceiver));
+
         private readonly HashSet<uint> _acksToSend = new HashSet<uint>(64);
         private readonly ReliableUdpHost _owner;
         private readonly List<ReceiverFrame> _receiverWindow = new List<ReceiverFrame>(32);
@@ -115,7 +120,9 @@ namespace Nexum.Core.ReliableUdp
                 if (frame.FrameNumber != ExpectedFrameNumber)
                     break;
 
-                ReceivedStream.PushBack(frame.Data, frame.Data.Length);
+                if (frame.Data != null && frame.Data.Length > 0)
+                    ReceivedStream.PushBack(frame.Data, 0, frame.Data.Length);
+
                 _receiverWindow.RemoveAt(0);
                 ExpectedFrameNumber++;
             }

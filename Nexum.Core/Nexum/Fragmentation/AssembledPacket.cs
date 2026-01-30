@@ -9,5 +9,7 @@ namespace Nexum.Core.Fragmentation
         internal IPEndPoint SenderEndPoint { get; set; }
 
         internal uint SrcHostId { get; set; }
+
+        internal ushort FilterTag { get; set; }
     }
 }

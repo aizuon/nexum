@@ -1,7 +1,11 @@
-using System.Threading.Tasks;
+using System.Net;
 using DotNetty.Transport.Channels;
 using Nexum.Client.Core;
+using Nexum.Client.P2P;
+using Nexum.Core.Configuration;
+using Nexum.Core.DotNetty.Codecs;
 using Nexum.Core.Fragmentation;
+using Nexum.Core.ReliableUdp;
 using Nexum.Core.Routing;
 using Nexum.Core.Serialization;
 using Nexum.Core.Udp;
@@ -24,67 +28,100 @@ namespace Nexum.Client.Udp
 
         public override void ChannelRead(IChannelHandlerContext context, object obj)
         {
-            var message = obj as UdpMessage;
-            var content = message.Content;
-
-            double currentTime = _owner.GetAbsoluteTime();
-
-            UdpPacketDefragBoard defragBoard;
-            uint srcHostId;
-
-            if ((_owner.ServerUdpSocket != null && message.EndPoint.Equals(_owner.ServerUdpSocket)) ||
-                FilterTag.Create((uint)HostId.Server, _owner.HostId) == message.FilterTag)
+            switch (obj)
             {
-                defragBoard = _owner.UdpDefragBoard;
-                srcHostId = (uint)HostId.Server;
+                case InboundReliableUdpFrame reliableFrame:
+                    HandleReliableUdpFrame(context, reliableFrame);
+                    return;
+
+                case InboundUdpMessage inboundMsg:
+                    HandleInboundUdpMessage(context, inboundMsg);
+                    return;
+
+                case AssembledPacket assembledPacket:
+                    HandleAssembledPacket(context, assembledPacket);
+                    return;
+
+                default:
+                    _logger.Warning("Received unknown message type: {Type}", obj?.GetType().Name);
+                    return;
             }
-            else
-            {
-                var p2pMember = _owner.P2PGroup?.FindMember(_owner.HostId, message.EndPoint, message.FilterTag);
+        }
 
-                if (p2pMember != null)
+        private void HandleReliableUdpFrame(IChannelHandlerContext context, InboundReliableUdpFrame reliableFrame)
+        {
+            var endPoint = reliableFrame.SenderEndPoint;
+            ushort filterTag = reliableFrame.FilterTag;
+
+            if (IsFromServer(endPoint, filterTag))
+            {
+                if (_owner.ServerReliableUdp != null)
                 {
-                    defragBoard = p2pMember.UdpDefragBoard;
-                    srcHostId = p2pMember.HostId;
+                    _owner.ServerReliableUdp.TakeReceivedFrame(reliableFrame.Frame);
+                    ExtractMessagesFromServerReliableUdpStream(filterTag, endPoint);
                 }
                 else
                 {
-                    defragBoard = _owner.UdpDefragBoard;
-                    srcHostId = (uint)HostId.None;
+                    if (reliableFrame.Frame.Type == ReliableUdpFrameType.Data && reliableFrame.Frame.Data != null)
+                        if (ReliableUdpHelper.UnwrapPayload(reliableFrame.Frame.Data, out var payload))
+                        {
+                            var innerMessage = new NetMessage(payload.ToArray(), true);
+                            NetClientHandler.ReadMessage(_owner, innerMessage, filterTag, endPoint);
+                        }
                 }
             }
-
-            var result = defragBoard.PushFragment(
-                message,
-                srcHostId,
-                currentTime,
-                out var assembledPacket,
-                out string error);
-
-            if (result == AssembledPacketError.Assembling)
+            else
             {
-                content.Release();
-                return;
+                var sourceMember =
+                    _owner.P2PGroup?.FindMember(_owner.HostId, endPoint, filterTag);
+                if (sourceMember == null)
+                {
+                    _logger.Verbose(
+                        "ReliableUdp_Frame from unknown source, ignoring => udpEndPoint = {UdpEndPoint}, filterTag = {FilterTag}",
+                        endPoint, filterTag);
+                    return;
+                }
+
+                sourceMember.ProcessReceivedReliableUdpFrame(reliableFrame.Frame);
+                ExtractMessagesFromP2PReliableUdpStream(sourceMember, filterTag, endPoint);
             }
-
-            if (result == AssembledPacketError.Error)
-            {
-                _logger.Warning("UDP defragmentation error: {Error}", error);
-                content.Release();
-                return;
-            }
-
-            var assembledMessage = new NetMessage(assembledPacket.Packet.AssembledData, true);
-
-            NetClientHandler.ReadFrame(_owner, assembledMessage, message.FilterTag, message.EndPoint, true);
-
-            content.Release();
         }
 
-        public override Task WriteAsync(IChannelHandlerContext context, object message)
+        private void HandleInboundUdpMessage(IChannelHandlerContext context, InboundUdpMessage inboundMsg)
         {
-            var udpMessage = message as UdpMessage;
-            return base.WriteAsync(context, udpMessage);
+            var assembledPacket = inboundMsg.AssembledPacket;
+            var endPoint = assembledPacket.SenderEndPoint;
+
+            inboundMsg.NetMessage.ReadOffset = 0;
+            NetClientHandler.ReadFrame(_owner, inboundMsg.NetMessage, assembledPacket.FilterTag, endPoint, true);
+        }
+
+        private void HandleAssembledPacket(IChannelHandlerContext context, AssembledPacket assembledPacket)
+        {
+            var endPoint = assembledPacket.SenderEndPoint;
+            var assembledMessage = new NetMessage(assembledPacket.Packet.AssembledData, true);
+            NetClientHandler.ReadFrame(_owner, assembledMessage, assembledPacket.FilterTag, endPoint, true);
+        }
+
+        private bool IsFromServer(IPEndPoint endPoint, ushort filterTag)
+        {
+            return (_owner.ServerUdpSocket != null && endPoint.Equals(_owner.ServerUdpSocket)) ||
+                   FilterTag.Create((uint)HostId.Server, _owner.HostId) == filterTag;
+        }
+
+        private void ExtractMessagesFromServerReliableUdpStream(ushort filterTag, IPEndPoint udpEndPoint)
+        {
+            var stream = _owner.ServerReliableUdp?.ReceivedStream;
+            ReliableUdpHelper.ExtractMessagesFromStream(stream,
+                msg => NetClientHandler.ReadMessage(_owner, msg, filterTag, udpEndPoint));
+        }
+
+        private void ExtractMessagesFromP2PReliableUdpStream(P2PMember sourceMember, ushort filterTag,
+            IPEndPoint udpEndPoint)
+        {
+            var stream = sourceMember.ToPeerReliableUdp?.ReceivedStream;
+            ReliableUdpHelper.ExtractMessagesFromStream(stream,
+                msg => NetClientHandler.ReadMessage(_owner, msg, filterTag, udpEndPoint));
         }
     }
 }

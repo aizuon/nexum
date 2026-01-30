@@ -2,27 +2,26 @@ using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Threading;
-using DotNetty.Buffers;
+using DotNetty.Codecs;
+using DotNetty.Transport.Channels;
 using Nexum.Core.Configuration;
 using Nexum.Core.Mtu;
-using Nexum.Core.Routing;
-using Nexum.Core.Serialization;
 using Nexum.Core.Udp;
 
-namespace Nexum.Core.Fragmentation
+namespace Nexum.Core.DotNetty.Codecs
 {
-    internal sealed class UdpPacketFragBoard
+    internal sealed class UdpFragmentationEncoder : MessageToMessageEncoder<OutboundUdpPacket>
     {
         private uint _currentPacketId;
 
-        internal UdpPacketFragBoard()
+        internal UdpFragmentationEncoder()
         {
             _currentPacketId = (uint)Random.Shared.Next();
         }
 
         internal MtuDiscovery MtuDiscovery { get; set; }
 
-        internal UdpPacketDefragBoard DefragBoard { get; set; }
+        internal UdpDefragmentationDecoder DefragDecoder { get; set; }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private int GetEffectiveMtu()
@@ -30,62 +29,80 @@ namespace Nexum.Core.Fragmentation
             if (MtuDiscovery != null)
                 return MtuDiscovery.ConfirmedMtu;
 
-            if (DefragBoard != null)
-                return DefragBoard.InferredMtu;
+            if (DefragDecoder != null)
+                return DefragDecoder.InferredMtu;
 
             return FragmentConfig.MtuLength;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        internal IEnumerable<UdpMessage> FragmentPacket(NetMessage message, uint srcHostId,
-            uint destHostId)
+        private int GetEffectiveMtu(OutboundUdpPacket packet)
         {
-            ushort filterTag = FilterTag.Create(srcHostId, destHostId);
-            return FragmentPacket(message, filterTag);
+            if (packet.Mtu > 0)
+                return packet.Mtu;
+
+            return GetEffectiveMtu();
         }
 
-        internal IEnumerable<UdpMessage> FragmentPacket(NetMessage message, ushort filterTag)
+        protected override void Encode(IChannelHandlerContext context, OutboundUdpPacket message, List<object> output)
         {
-            if (message.Length <= 0)
-                yield break;
+            var content = message.Content;
+            int packetLength = content.ReadableBytes;
 
-            int mtuLength = GetEffectiveMtu();
-
-            if (message.Length <= mtuLength)
+            if (packetLength <= 0)
             {
-                yield return new UdpMessage
+                content.Release();
+                return;
+            }
+
+            int mtuLength = GetEffectiveMtu(message);
+            ushort filterTag = message.FilterTag;
+            var endPoint = message.EndPoint;
+
+            if (packetLength <= mtuLength)
+            {
+                output.Add(new UdpMessage
                 {
                     SplitterFlag = Constants.UdpFullPacketSplitter,
                     FilterTag = filterTag,
-                    PacketLength = message.Length,
+                    PacketLength = packetLength,
                     PacketId = 0,
                     FragmentId = 0,
-                    Content = Unpooled.WrappedBuffer(message.GetBufferUnsafe(), 0, message.Length)
-                };
-                yield break;
+                    Content = content.RetainedSlice(content.ReaderIndex, packetLength),
+                    EndPoint = endPoint
+                });
+                content.Release();
+                return;
             }
+
+            int fragmentCount = GetFragmentCount(packetLength, mtuLength);
+            if (output.Capacity < fragmentCount)
+                output.Capacity = fragmentCount;
 
             uint packetId = Interlocked.Increment(ref _currentPacketId);
             int offset = 0;
             uint fragmentId = 0;
 
-            while (offset < message.Length)
+            while (offset < packetLength)
             {
-                int fragmentPayloadSize = Math.Min(mtuLength, message.Length - offset);
+                int fragmentPayloadSize = Math.Min(mtuLength, packetLength - offset);
 
-                yield return new UdpMessage
+                output.Add(new UdpMessage
                 {
                     SplitterFlag = Constants.UdpFragmentSplitter,
                     FilterTag = filterTag,
-                    PacketLength = message.Length,
+                    PacketLength = packetLength,
                     PacketId = packetId,
                     FragmentId = fragmentId,
-                    Content = Unpooled.WrappedBuffer(message.GetBufferUnsafe(), offset, fragmentPayloadSize)
-                };
+                    Content = content.RetainedSlice(content.ReaderIndex + offset, fragmentPayloadSize),
+                    EndPoint = endPoint
+                });
 
                 offset += fragmentPayloadSize;
                 fragmentId++;
             }
+
+            content.Release();
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]

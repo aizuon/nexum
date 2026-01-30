@@ -1,16 +1,11 @@
 using System;
 using DotNetty.Buffers;
 using DotNetty.Transport.Channels;
-using Serilog;
-using Serilog.Core;
 
 namespace Nexum.Core.DotNetty.Codecs
 {
     internal sealed class NexumFrameDecoder : LengthFieldBasedFrameDecoder
     {
-        internal static readonly ILogger Logger =
-            Log.ForContext(Constants.SourceContextPropertyName, nameof(NexumFrameDecoder));
-
         internal NexumFrameDecoder(int maxFrameLength)
             : base(ByteOrder.LittleEndian, maxFrameLength, 2, 1, 0, 0, true)
         {
@@ -34,7 +29,6 @@ namespace Nexum.Core.DotNetty.Codecs
                     return buffer.GetIntLE(offset) + scalarPrefix;
 
                 default:
-                    Logger.Error("Invalid scalar prefix {ScalarPrefix} at offset {Offset}", scalarPrefix, offset);
                     throw new Exception("Invalid scalar prefix " + scalarPrefix);
             }
         }

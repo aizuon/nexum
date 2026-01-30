@@ -30,6 +30,9 @@ namespace Nexum.Server.Udp
         {
             Port = listenerPort;
             _logger = Log.ForContext(SerilogConstants.SourceContextPropertyName, $"{nameof(UdpSocket)}({Port})");
+
+            var defragDecoder = new UdpDefragmentationDecoder(_owner, NetConfig.MessageMaxLength);
+
             Channel = await new Bootstrap()
                 .Group(eventLoopGroup)
                 .ChannelFactory(() => new SocketDatagramChannel(AddressFamily.InterNetwork))
@@ -37,7 +40,10 @@ namespace Nexum.Server.Udp
                 {
                     ch.Pipeline
                         .AddLast(new UdpFrameDecoder(NetConfig.MessageMaxLength))
+                        .AddLast(defragDecoder)
                         .AddLast(new UdpFrameEncoder())
+                        .AddLast(new UdpFragmentationEncoder { DefragDecoder = defragDecoder })
+                        .AddLast(new ReliableUdpCodecHandler())
                         .AddLast(new UdpHandler(_owner, Port));
                 }))
                 .BindAsync(new IPEndPoint(udpAddress, Port));
