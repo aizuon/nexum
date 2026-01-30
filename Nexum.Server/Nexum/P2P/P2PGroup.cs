@@ -43,7 +43,7 @@ namespace Nexum.Server.P2P
                 Server.InitiateUdpSetup(session);
 
                 if (encrypted)
-                    session.RmiToClient(new P2PGroupMemberJoin
+                    session.RmiToClient(new P2PGroup_MemberJoin
                     {
                         GroupHostId = HostId,
                         HostId = session.HostId,
@@ -57,7 +57,7 @@ namespace Nexum.Server.P2P
                         BindPort = session.UdpLocalEndPoint?.Port ?? 0
                     });
                 else
-                    session.RmiToClient(new P2PGroupMemberJoinUnencrypted
+                    session.RmiToClient(new P2PGroup_MemberJoin_Unencrypted
                     {
                         GroupHostId = HostId,
                         HostId = session.HostId,
@@ -109,7 +109,7 @@ namespace Nexum.Server.P2P
 
                     if (encrypted)
                     {
-                        member.Session.RmiToClient(new P2PGroupMemberJoin
+                        member.Session.RmiToClient(new P2PGroup_MemberJoin
                         {
                             GroupHostId = HostId,
                             HostId = session.HostId,
@@ -123,7 +123,7 @@ namespace Nexum.Server.P2P
                             BindPort = bindPortForMember
                         });
 
-                        session.RmiToClient(new P2PGroupMemberJoin
+                        session.RmiToClient(new P2PGroup_MemberJoin
                         {
                             GroupHostId = HostId,
                             HostId = member.Session.HostId,
@@ -139,7 +139,7 @@ namespace Nexum.Server.P2P
                     }
                     else
                     {
-                        member.Session.RmiToClient(new P2PGroupMemberJoinUnencrypted
+                        member.Session.RmiToClient(new P2PGroup_MemberJoin_Unencrypted
                         {
                             GroupHostId = HostId,
                             HostId = session.HostId,
@@ -151,7 +151,7 @@ namespace Nexum.Server.P2P
                             BindPort = bindPortForMember
                         });
 
-                        session.RmiToClient(new P2PGroupMemberJoinUnencrypted
+                        session.RmiToClient(new P2PGroup_MemberJoin_Unencrypted
                         {
                             GroupHostId = HostId,
                             HostId = member.Session.HostId,
@@ -177,7 +177,7 @@ namespace Nexum.Server.P2P
 
                 session.P2PGroup = null;
 
-                session.RmiToClient(new P2PGroupMemberLeave
+                session.RmiToClient(new P2PGroup_MemberLeave
                 {
                     HostId = HostId,
                     GroupHostId = session.HostId
@@ -198,13 +198,13 @@ namespace Nexum.Server.P2P
                     if (member.Session.HostId == session.HostId)
                         continue;
 
-                    member.Session.RmiToClient(new P2PGroupMemberLeave
+                    member.Session.RmiToClient(new P2PGroup_MemberLeave
                     {
                         HostId = session.HostId,
                         GroupHostId = HostId
                     });
 
-                    session.RmiToClient(new P2PGroupMemberLeave
+                    session.RmiToClient(new P2PGroup_MemberLeave
                     {
                         HostId = member.Session.HostId,
                         GroupHostId = HostId

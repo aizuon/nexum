@@ -116,10 +116,15 @@ namespace Nexum.Core.Utilities
         public static byte[] CompressZLib(this byte[] @this)
         {
             using (var ms = new MemoryStream())
-            using (var zlib = new ZLibStream(ms, CompressionLevel.Optimal))
             {
-                zlib.Write(@this, 0, @this.Length);
-                zlib.Close();
+                using (var zlib = new ZLibStream(ms, CompressionLevel.Optimal, true))
+                {
+                    zlib.Write(@this, 0, @this.Length);
+                }
+
+                if (ms.TryGetBuffer(out var buffer))
+                    return buffer.AsSpan().ToArray();
+
                 return ms.ToArray();
             }
         }
@@ -130,7 +135,7 @@ namespace Nexum.Core.Utilities
             using (var zlib = new ZLibStream(inputStream, CompressionMode.Decompress))
             using (var outputStream = new MemoryStream())
             {
-                byte[] buffer = ArrayPool<byte>.Shared.Rent(4096);
+                byte[] buffer = ArrayPool<byte>.Shared.Rent(16 * 1024);
                 try
                 {
                     int bytesRead;
@@ -141,6 +146,9 @@ namespace Nexum.Core.Utilities
                 {
                     ArrayPool<byte>.Shared.Return(buffer);
                 }
+
+                if (outputStream.TryGetBuffer(out var outBuffer))
+                    return outBuffer.AsSpan().ToArray();
 
                 return outputStream.ToArray();
             }

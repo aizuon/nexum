@@ -794,7 +794,7 @@ namespace Nexum.Client.Core
             {
                 if (reliable && ToServerReliableUdp != null)
                 {
-                    byte[] wrappedData = ReliableUdpHelper.WrapPayload(data.GetBuffer());
+                    byte[] wrappedData = ReliableUdpHelper.WrapPayload(data.GetBufferSpan());
                     ToServerReliableUdp.Send(wrappedData, wrappedData.Length);
                 }
                 else
@@ -814,7 +814,7 @@ namespace Nexum.Client.Core
                 return;
 
             ServerUdpRequested = true;
-            RmiToServer(new C2SRequestCreateUdpSocket());
+            RmiToServer(new C2S_RequestCreateUdpSocket());
         }
 
         private void ToServer(NetMessage message)
@@ -858,7 +858,7 @@ namespace Nexum.Client.Core
 
             CloseUdp();
 
-            RmiToServer(new C2SRequestCreateUdpSocket());
+            RmiToServer(new C2S_RequestCreateUdpSocket());
         }
 
         private void ReliableUdpFrameMove(double elapsedTime)
@@ -919,7 +919,7 @@ namespace Nexum.Client.Core
             {
                 ServerUdpFallbackCount++;
 
-                RmiToServer(new C2SRequestCreateUdpSocket());
+                RmiToServer(new C2S_RequestCreateUdpSocket());
             }
             else
             {

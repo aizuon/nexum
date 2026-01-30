@@ -561,6 +561,36 @@ namespace Nexum.Core.Serialization
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public bool ReadAsSpan(int length, out ReadOnlySpan<byte> span)
+        {
+            span = default(ReadOnlySpan<byte>);
+            if (_buffer.Length < ReadOffset + length)
+                return false;
+
+            span = _buffer.AsSpan(ReadOffset, length);
+            ReadOffset += length;
+            return true;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public bool ReadByteArrayAsSpan(out ReadOnlySpan<byte> span)
+        {
+            span = default(ReadOnlySpan<byte>);
+            long length = 0;
+            if (!ReadScalar(ref length))
+                return false;
+
+            return ReadAsSpan((int)length, out span);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void WriteByteArray(ReadOnlySpan<byte> data)
+        {
+            WriteScalar(data.Length);
+            Write(data);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void WriteZeroes(int count)
         {
             if (count <= 0)

@@ -84,7 +84,7 @@ namespace Nexum.Core.Crypto
             return _rc4Key?.GetKey();
         }
 
-        internal byte[] EncryptKey(byte[] key)
+        internal byte[] EncryptKey(ReadOnlySpan<byte> key)
         {
             var aesKey = _aesKey;
             if (aesKey == null)
@@ -95,7 +95,7 @@ namespace Nexum.Core.Crypto
 
             int outputSize = cipher.GetOutputSize(key.Length);
             byte[] output = GC.AllocateUninitializedArray<byte>(outputSize);
-            int len = cipher.ProcessBytes(key, 0, key.Length, output, 0);
+            int len = cipher.ProcessBytes(key, output.AsSpan());
             len += cipher.DoFinal(output, len);
 
             if (len == output.Length)
@@ -106,7 +106,7 @@ namespace Nexum.Core.Crypto
             return result;
         }
 
-        internal byte[] DecryptKey(byte[] encryptedKey)
+        internal byte[] DecryptKey(ReadOnlySpan<byte> encryptedKey)
         {
             var aesKey = _aesKey;
             if (aesKey == null)
@@ -117,7 +117,7 @@ namespace Nexum.Core.Crypto
 
             int outputSize = cipher.GetOutputSize(encryptedKey.Length);
             byte[] output = GC.AllocateUninitializedArray<byte>(outputSize);
-            int len = cipher.ProcessBytes(encryptedKey, 0, encryptedKey.Length, output, 0);
+            int len = cipher.ProcessBytes(encryptedKey, output.AsSpan());
             len += cipher.DoFinal(output, len);
 
             if (len == output.Length)
@@ -126,11 +126,6 @@ namespace Nexum.Core.Crypto
             byte[] result = GC.AllocateUninitializedArray<byte>(len);
             Buffer.BlockCopy(output, 0, result, 0, len);
             return result;
-        }
-
-        internal byte[] Encrypt(byte[] data, EncryptMode mode)
-        {
-            return Encrypt(data.AsSpan(), mode);
         }
 
         internal byte[] Encrypt(ReadOnlySpan<byte> data, EncryptMode mode)
@@ -195,11 +190,6 @@ namespace Nexum.Core.Crypto
                 default:
                     throw new ArgumentException("Invalid mode", nameof(mode));
             }
-        }
-
-        internal byte[] Decrypt(byte[] data, EncryptMode mode)
-        {
-            return Decrypt(data.AsSpan(), mode);
         }
 
         internal byte[] Decrypt(ReadOnlySpan<byte> data, EncryptMode mode)

@@ -18,6 +18,7 @@ using Nexum.Core.Events;
 using Nexum.Core.Fragmentation;
 using Nexum.Core.Holepunching;
 using Nexum.Core.Message.S2C;
+using Nexum.Core.Message.X2X;
 using Nexum.Core.Rmi.S2C;
 using Nexum.Core.Routing;
 using Nexum.Core.Serialization;
@@ -175,9 +176,12 @@ namespace Nexum.Server.Core
 
         public byte[] ExportRsaPublicKey()
         {
-            var pubKey = DotNetUtilities.GetRsaPublicKey(RSA.ExportParameters(false));
-            var pubKeyStruct = new RsaPublicKeyStructure(pubKey.Modulus, pubKey.Exponent);
-            return pubKeyStruct.GetDerEncoded();
+            lock (RSALock)
+            {
+                var pubKey = DotNetUtilities.GetRsaPublicKey(RSA.ExportParameters(false));
+                var pubKeyStruct = new RsaPublicKeyStructure(pubKey.Modulus, pubKey.Exponent);
+                return pubKeyStruct.GetDerEncoded();
+            }
         }
 
         public string ExportRsaPublicKeyBase64()
@@ -406,14 +410,15 @@ namespace Nexum.Server.Core
                     request.SenderSession.HostId,
                     request.MagicNumber);
 
-                request.SenderSession.NexumToClient(
-                    HolepunchHelper.CreatePeerUdpServerHolepunchAckMessage(request.MagicNumber,
-                        capturedSenderUdpEndpoint,
-                        session.HostId));
+                var peerUdpServerHolepunchAckMsg = new PeerUdp_ServerHolepunchAck
+                {
+                    MagicNumber = request.MagicNumber,
+                    EndPoint = capturedSenderUdpEndpoint,
+                    TargetHostId = session.HostId
+                }.Serialize();
+                request.SenderSession.NexumToClient(peerUdpServerHolepunchAckMsg);
                 HolepunchHelper.SendBurstMessages(
-                    () => HolepunchHelper.CreatePeerUdpServerHolepunchAckMessage(request.MagicNumber,
-                        capturedSenderUdpEndpoint,
-                        session.HostId),
+                    peerUdpServerHolepunchAckMsg,
                     msg => request.SenderSession.NexumToClient(msg)
                 );
             }
@@ -624,7 +629,7 @@ namespace Nexum.Server.Core
             session.HolepunchMagicNumber = Guid.NewGuid();
             MagicNumberSessions.TryAdd(session.HolepunchMagicNumber, session);
 
-            session.RmiToClient(new S2CRequestCreateUdpSocket
+            session.RmiToClient(new S2C_RequestCreateUdpSocket
             {
                 UdpSocket = new IPEndPoint(IPAddress.Loopback, ((IPEndPoint)socket.Channel.LocalAddress).Port)
             });

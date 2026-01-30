@@ -105,13 +105,15 @@ namespace Nexum.Server.Udp
                 session.Logger.Debug("UDP holepunch successful, endpoint = {UdpEndPoint}",
                     session.UdpEndPoint);
 
-                session.NexumToClientUdpIfAvailable(
-                    HolepunchHelper.CreateServerHolepunchAckMessage(session.HolepunchMagicNumber, session.UdpEndPoint),
-                    true);
+                var serverHolepunchAckMsg = new ServerHolepunchAck
+                {
+                    MagicNumber = session.HolepunchMagicNumber,
+                    EndPoint = session.UdpEndPoint
+                }.Serialize();
                 var capturedSession = session;
+                session.NexumToClientUdpIfAvailable(serverHolepunchAckMsg, true);
                 HolepunchHelper.SendBurstMessagesWithCheck(
-                    () => HolepunchHelper.CreateServerHolepunchAckMessage(
-                        capturedSession.HolepunchMagicNumber, capturedSession.UdpEndPoint),
+                    serverHolepunchAckMsg,
                     msg => capturedSession.NexumToClientUdpIfAvailable(msg, true),
                     () => !capturedSession.UdpEnabled
                 );

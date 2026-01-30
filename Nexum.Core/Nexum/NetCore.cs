@@ -10,6 +10,8 @@ namespace Nexum.Core
 {
     public abstract class NetCore : IDisposable
     {
+        internal readonly object RSALock = new object();
+
         public ILogger Logger { get; protected set; }
 
         public string ServerName { get; protected set; }

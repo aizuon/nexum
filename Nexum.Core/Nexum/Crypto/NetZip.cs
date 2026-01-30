@@ -43,10 +43,15 @@ namespace Nexum.Core.Crypto
         internal static byte[] CompressData(byte[] data)
         {
             using (var mem = new MemoryStream())
-            using (var zlib = new ZLibStream(mem, CompressionLevel.Optimal))
             {
-                zlib.Write(data, 0, data.Length);
-                zlib.Close();
+                using (var zlib = new ZLibStream(mem, CompressionLevel.Optimal, true))
+                {
+                    zlib.Write(data, 0, data.Length);
+                }
+
+                if (mem.TryGetBuffer(out var buffer))
+                    return buffer.AsSpan().ToArray();
+
                 return mem.ToArray();
             }
         }

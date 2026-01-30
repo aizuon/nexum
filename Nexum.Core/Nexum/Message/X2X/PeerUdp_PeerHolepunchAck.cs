@@ -6,7 +6,7 @@ using Nexum.Core.Configuration;
 namespace Nexum.Core.Message.X2X
 {
     [NetCoreMessage(MessageType.PeerUdp_PeerHolepunchAck)]
-    internal partial class PeerUdpPeerHolepunchAck
+    internal partial class PeerUdp_PeerHolepunchAck
     {
         [NetProperty(0)]
         public Guid MagicNumber { get; set; }

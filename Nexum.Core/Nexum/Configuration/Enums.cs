@@ -126,12 +126,10 @@ namespace Nexum.Core.Configuration
         RequestMeasureSendSpeed = 64517,
         S2C_RequestCreateUdpSocket = 64518,
         S2C_CreateUdpSocketAck = 64519,
-        Rmi_First = 65000,
         HolsterP2PHolepunchTrial = 65001,
         ReportUdpMessageCount = 65002,
         ReportServerTimeAndFrameRateAndPing = 65003,
-        ReportServerTimeAndFrameRateAndPong = 65004,
-        Rmi_Last = 65005
+        ReportServerTimeAndFrameRateAndPong = 65004
     }
 
     internal enum ErrorType : uint

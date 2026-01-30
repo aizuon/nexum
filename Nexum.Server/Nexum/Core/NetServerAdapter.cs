@@ -22,14 +22,13 @@ namespace Nexum.Server.Core
         public override void ChannelRead(IChannelHandlerContext context, object message)
         {
             var buffer = message as IByteBuffer;
-            int offset = buffer.ArrayOffset + buffer.ReaderIndex;
-            int length = buffer.ReadableBytes;
-            byte[] data = GC.AllocateUninitializedArray<byte>(length);
-            Buffer.BlockCopy(buffer.Array, offset, data, 0, length);
+            int readableBytes = buffer.ReadableBytes;
+            byte[] data = GC.AllocateUninitializedArray<byte>(readableBytes);
+            buffer.GetBytes(buffer.ReaderIndex, data, 0, readableBytes);
 
             var session = context.Channel.GetAttribute(ChannelAttributes.Session).Get();
 
-            var netMessage = new NetMessage(data, length, true);
+            var netMessage = new NetMessage(data, readableBytes, true);
 
             NetServerHandler.ReadFrame(Owner, session, netMessage);
 

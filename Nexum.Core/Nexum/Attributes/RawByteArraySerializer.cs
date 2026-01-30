@@ -11,11 +11,9 @@ namespace Nexum.Core.Attributes
 
         public static bool Deserialize(NetMessage msg, out ByteArray obj)
         {
+            obj = null;
             if (!msg.ReadAll(out byte[] bytes))
-            {
-                obj = new ByteArray();
                 return false;
-            }
 
             obj = new ByteArray(bytes, bytes.Length, true);
             return true;

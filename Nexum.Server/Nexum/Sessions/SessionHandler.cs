@@ -43,9 +43,13 @@ namespace Nexum.Server.Sessions
             var config = Owner.NetSettings;
             session.UdpDefragBoard.MaxMessageLength = config.MessageMaxLength;
 
-            var pubKey = DotNetUtilities.GetRsaPublicKey(Owner.RSA.ExportParameters(false));
-            var pubKeyStruct = new RsaPublicKeyStructure(pubKey.Modulus, pubKey.Exponent);
-            byte[] encodedKey = pubKeyStruct.GetDerEncoded();
+            byte[] encodedKey;
+            lock (Owner.RSALock)
+            {
+                var pubKey = DotNetUtilities.GetRsaPublicKey(Owner.RSA.ExportParameters(false));
+                var pubKeyStruct = new RsaPublicKeyStructure(pubKey.Modulus, pubKey.Exponent);
+                encodedKey = pubKeyStruct.GetDerEncoded();
+            }
 
             var notifyServerConnectionHint = new NotifyServerConnectionHint
             {

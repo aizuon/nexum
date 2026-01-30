@@ -130,9 +130,9 @@ namespace Nexum.Server.Core
             else
             {
                 if (frame.Type == ReliableUdpFrameType.Data && frame.Data != null)
-                    if (ReliableUdpHelper.UnwrapPayload(frame.Data, out byte[] payload))
+                    if (ReliableUdpHelper.UnwrapPayload(frame.Data, out var payload))
                     {
-                        var innerMessage = new NetMessage(payload, true);
+                        var innerMessage = new NetMessage(payload.ToArray(), true);
                         ReadMessage(server, session, innerMessage, udpEndPoint);
                     }
             }
@@ -172,12 +172,16 @@ namespace Nexum.Server.Core
             if (!NotifyCSEncryptedSessionKey.Deserialize(message, out var packet))
                 return;
 
-            byte[] decryptedSessionKey =
-                server.RSA.Decrypt(packet.EncryptedSessionKey.GetBuffer(), RSAEncryptionPadding.OaepSHA256);
+            byte[] decryptedSessionKey;
+            lock (server.RSALock)
+            {
+                decryptedSessionKey =
+                    server.RSA.Decrypt(packet.EncryptedSessionKey.GetBufferSpan(), RSAEncryptionPadding.OaepSHA256);
+            }
 
             session.Crypt = new NetCrypt(decryptedSessionKey);
             session.Crypt.InitializeFastEncryption(
-                session.Crypt.DecryptKey(packet.EncryptedFastSessionKey.GetBuffer())
+                session.Crypt.DecryptKey(packet.EncryptedFastSessionKey.GetBufferSpan())
             );
 
             session.NexumToClient(new NotifyCSSessionKeySuccess());
@@ -337,11 +341,14 @@ namespace Nexum.Server.Core
 
             session.Logger.Debug("ServerHolepunch => guid = {MagicNumber}", packet.MagicNumber);
 
-            session.NexumToClientUdpIfAvailable(
-                HolepunchHelper.CreateServerHolepunchAckMessage(capturedMagicNumber, capturedUdpEndPoint),
-                true);
+            var serverHolepunchAckMsg = new ServerHolepunchAck
+            {
+                MagicNumber = capturedMagicNumber,
+                EndPoint = capturedUdpEndPoint
+            }.Serialize();
+            session.NexumToClientUdpIfAvailable(serverHolepunchAckMsg, true);
             HolepunchHelper.SendBurstMessagesWithCheck(
-                () => HolepunchHelper.CreateServerHolepunchAckMessage(capturedMagicNumber, capturedUdpEndPoint),
+                serverHolepunchAckMsg,
                 msg => session.NexumToClientUdpIfAvailable(msg, true),
                 () => !session.UdpEnabled
             );
@@ -387,10 +394,13 @@ namespace Nexum.Server.Core
                 session.P2PGroup.P2PMembersInternal.TryGetValue(session.HostId, out var member))
                 session.InitializeToClientReliableUdp(member.P2PFirstFrameNumber);
 
-            session.NexumToClientUdpIfAvailable(
-                HolepunchHelper.CreateNotifyClientServerUdpMatchedMessage(capturedMagicNumber), true);
+            var notifyUdpMatchedMsg = new NotifyClientServerUdpMatched
+            {
+                MagicNumber = capturedMagicNumber
+            }.Serialize();
+            session.NexumToClientUdpIfAvailable(notifyUdpMatchedMsg, true);
             HolepunchHelper.SendBurstMessages(
-                () => HolepunchHelper.CreateNotifyClientServerUdpMatchedMessage(capturedMagicNumber),
+                notifyUdpMatchedMsg,
                 msg => session.NexumToClientUdpIfAvailable(msg, true),
                 HolepunchConfig.UdpMatchedDelayMs
             );
@@ -405,7 +415,7 @@ namespace Nexum.Server.Core
             if (!server.UdpEnabled)
                 return;
 
-            if (!PeerUdpServerHolepunch.Deserialize(message, out var packet))
+            if (!PeerUdp_ServerHolepunch.Deserialize(message, out var packet))
                 return;
 
             var group = session.P2PGroup;
@@ -450,12 +460,15 @@ namespace Nexum.Server.Core
                 packet.MagicNumber,
                 packet.TargetHostId);
 
-            session.NexumToClient(
-                HolepunchHelper.CreatePeerUdpServerHolepunchAckMessage(packet.MagicNumber, udpEndPoint,
-                    targetPeer.Session.HostId));
+            var peerUdpServerHolepunchAckMsg = new PeerUdp_ServerHolepunchAck
+            {
+                MagicNumber = packet.MagicNumber,
+                EndPoint = udpEndPoint,
+                TargetHostId = targetPeer.Session.HostId
+            }.Serialize();
+            session.NexumToClient(peerUdpServerHolepunchAckMsg);
             HolepunchHelper.SendBurstMessages(
-                () => HolepunchHelper.CreatePeerUdpServerHolepunchAckMessage(packet.MagicNumber, udpEndPoint,
-                    targetPeer.Session.HostId),
+                peerUdpServerHolepunchAckMsg,
                 msg => session.NexumToClient(msg)
             );
         }
@@ -466,7 +479,7 @@ namespace Nexum.Server.Core
             if (!server.UdpEnabled)
                 return;
 
-            if (!PeerUdpNotifyHolepunchSuccess.Deserialize(message, out var packet))
+            if (!PeerUdp_NotifyHolepunchSuccess.Deserialize(message, out var packet))
                 return;
 
             var group = session.P2PGroup;
@@ -532,7 +545,7 @@ namespace Nexum.Server.Core
 
                 case NexumOpCode.P2P_NotifyDirectP2PDisconnected:
                 {
-                    if (!P2PNotifyDirectP2PDisconnected.Deserialize(message, out var packet))
+                    if (!P2P_NotifyDirectP2PDisconnected.Deserialize(message, out var packet))
                         return;
 
                     var reason = packet.Reason;
@@ -572,7 +585,7 @@ namespace Nexum.Server.Core
                         });
 
                     if (shouldNotify)
-                        stateA.RemotePeer.Session.RmiToClient(new P2PNotifyDirectP2PDisconnected2
+                        stateA.RemotePeer.Session.RmiToClient(new P2P_NotifyDirectP2PDisconnected2
                         {
                             HostId = session.HostId,
                             Reason = reason
@@ -593,7 +606,7 @@ namespace Nexum.Server.Core
 
                 case NexumOpCode.P2PGroup_MemberJoin_Ack:
                 {
-                    if (!P2PGroupMemberJoinAck.Deserialize(message, out var packet))
+                    if (!P2PGroup_MemberJoin_Ack.Deserialize(message, out var packet))
                         return;
 
                     if (session.HostId == packet.AddedMemberHostId)
@@ -813,7 +826,7 @@ namespace Nexum.Server.Core
                         "C2S_RequestCreateUdpSocket => assigned UDP endpoint {UdpEndpoint}, guid = {MagicNumber}",
                         udpEndpoint, session.HolepunchMagicNumber);
 
-                    session.RmiToClient(new S2CCreateUdpSocketAck
+                    session.RmiToClient(new S2C_CreateUdpSocketAck
                     {
                         Result = true,
                         UdpSocket = udpEndpoint

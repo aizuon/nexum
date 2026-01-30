@@ -283,7 +283,7 @@ namespace Nexum.Server.Sessions
             {
                 if (reliable && ToClientReliableUdp != null)
                 {
-                    byte[] wrappedData = ReliableUdpHelper.WrapPayload(data.GetBuffer());
+                    byte[] wrappedData = ReliableUdpHelper.WrapPayload(data.GetBufferSpan());
                     ToClientReliableUdp.Send(wrappedData, wrappedData.Length);
                 }
                 else

@@ -161,7 +161,7 @@ namespace Nexum.Client.P2P
 
                 if (reliable && ToPeerReliableUdp != null)
                 {
-                    byte[] wrappedPayload = ReliableUdpHelper.WrapPayload(data.GetBuffer());
+                    byte[] wrappedPayload = ReliableUdpHelper.WrapPayload(data.GetBufferSpan());
                     ToPeerReliableUdp.Send(wrappedPayload, wrappedPayload.Length);
                 }
                 else
@@ -443,7 +443,7 @@ namespace Nexum.Client.P2P
             Owner.OnP2PMemberRelayConnected(HostId);
 
             if (firstChance)
-                Owner.RmiToServer(new P2PNotifyDirectP2PDisconnected
+                Owner.RmiToServer(new P2P_NotifyDirectP2PDisconnected
                 {
                     HostId = HostId,
                     Reason = ErrorType.P2PUdpFailed

@@ -41,10 +41,13 @@ namespace BaseLib.Extensions
         public static byte[] CompressGZip(this byte[] buffer)
         {
             using var memoryStream = new MemoryStream();
-            using (var gZipStream = new GZipStream(memoryStream, CompressionMode.Compress))
+            using (var gZipStream = new GZipStream(memoryStream, CompressionMode.Compress, true))
             {
                 gZipStream.Write(buffer, 0, buffer.Length);
             }
+
+            if (memoryStream.TryGetBuffer(out var outBuffer))
+                return outBuffer.AsSpan().ToArray();
 
             return memoryStream.ToArray();
         }
@@ -52,10 +55,13 @@ namespace BaseLib.Extensions
         public static byte[] CompressDeflate(this byte[] buffer)
         {
             using var memoryStream = new MemoryStream();
-            using (var deflateStream = new DeflateStream(memoryStream, CompressionMode.Compress))
+            using (var deflateStream = new DeflateStream(memoryStream, CompressionMode.Compress, true))
             {
                 deflateStream.Write(buffer, 0, buffer.Length);
             }
+
+            if (memoryStream.TryGetBuffer(out var outBuffer))
+                return outBuffer.AsSpan().ToArray();
 
             return memoryStream.ToArray();
         }

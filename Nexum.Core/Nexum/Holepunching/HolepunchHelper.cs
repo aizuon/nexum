@@ -1,74 +1,16 @@
 using System;
 using System.Collections.Generic;
 using System.Net;
-using System.Runtime.CompilerServices;
 using System.Threading.Tasks;
 using Nexum.Core.Configuration;
-using Nexum.Core.Message.S2C;
-using Nexum.Core.Message.X2X;
 using Nexum.Core.Serialization;
 
 namespace Nexum.Core.Holepunching
 {
     internal static class HolepunchHelper
     {
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        internal static NetMessage CreateServerHolepunchMessage(Guid magicNumber)
-        {
-            return new ServerHolepunch { MagicNumber = magicNumber }.Serialize();
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        internal static NetMessage CreateServerHolepunchAckMessage(Guid magicNumber, IPEndPoint udpEndPoint)
-        {
-            return new ServerHolepunchAck { MagicNumber = magicNumber, EndPoint = udpEndPoint }.Serialize();
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        internal static NetMessage CreateNotifyClientServerUdpMatchedMessage(Guid magicNumber)
-        {
-            return new NotifyClientServerUdpMatched { MagicNumber = magicNumber }.Serialize();
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        internal static NetMessage CreatePeerUdpServerHolepunchMessage(Guid magicNumber, uint targetHostId)
-        {
-            return new PeerUdpServerHolepunch { MagicNumber = magicNumber, TargetHostId = targetHostId }
-                .Serialize();
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        internal static NetMessage CreatePeerUdpServerHolepunchAckMessage(Guid magicNumber, IPEndPoint udpEndPoint,
-            uint targetHostId)
-        {
-            return new PeerUdpServerHolepunchAck
-                { MagicNumber = magicNumber, EndPoint = udpEndPoint, TargetHostId = targetHostId }.Serialize();
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        internal static NetMessage CreatePeerUdpPeerHolepunchMessage(uint hostId, Guid peerMagicNumber,
-            Guid serverInstanceGuid, IPEndPoint targetEndpoint)
-        {
-            return new PeerUdpPeerHolepunch
-            {
-                HostId = hostId, PeerMagicNumber = peerMagicNumber, ServerInstanceGuid = serverInstanceGuid,
-                TargetEndpoint = targetEndpoint
-            }.Serialize();
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        internal static NetMessage CreatePeerUdpPeerHolepunchAckMessage(Guid magicNumber, uint hostId,
-            IPEndPoint selfUdpSocket, IPEndPoint receivedEndPoint, IPEndPoint targetEndPoint)
-        {
-            return new PeerUdpPeerHolepunchAck
-            {
-                MagicNumber = magicNumber, HostId = hostId, SelfUdpSocket = selfUdpSocket,
-                ReceivedEndPoint = receivedEndPoint, TargetEndPoint = targetEndPoint
-            }.Serialize();
-        }
-
         internal static void SendBurstMessages(
-            Func<NetMessage> messageFactory,
+            NetMessage message,
             Action<NetMessage> sendAction,
             int delayMs = HolepunchConfig.BurstDelayMs,
             int burstCount = HolepunchConfig.BurstCount)
@@ -77,8 +19,7 @@ namespace Nexum.Core.Holepunching
             {
                 for (int i = 0; i < burstCount; i++)
                 {
-                    var msg = messageFactory();
-                    sendAction(msg);
+                    sendAction(message);
                     if (i < burstCount - 1)
                         await Task.Delay(delayMs);
                 }
@@ -86,7 +27,7 @@ namespace Nexum.Core.Holepunching
         }
 
         internal static void SendBurstMessagesWithCheck(
-            Func<NetMessage> messageFactory,
+            NetMessage message,
             Action<NetMessage> sendAction,
             Func<bool> shouldContinue,
             int delayMs = HolepunchConfig.BurstDelayMs,
@@ -98,8 +39,7 @@ namespace Nexum.Core.Holepunching
                 {
                     if (!shouldContinue())
                         return;
-                    var msg = messageFactory();
-                    sendAction(msg);
+                    sendAction(message);
                     if (i < burstCount - 1)
                         await Task.Delay(delayMs);
                 }

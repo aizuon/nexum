@@ -6,7 +6,7 @@ using Nexum.Core.Configuration;
 namespace Nexum.Core.Message.X2X
 {
     [NetCoreMessage(MessageType.PeerUdp_PeerHolepunch)]
-    internal partial class PeerUdpPeerHolepunch
+    internal partial class PeerUdp_PeerHolepunch
     {
         [NetProperty(0)]
         public uint HostId { get; set; }

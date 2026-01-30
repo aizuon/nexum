@@ -6,7 +6,7 @@ using Nexum.Core.Serialization;
 namespace Nexum.Core.Rmi.S2C
 {
     [NetRmi(NexumOpCode.P2PGroup_MemberJoin_Unencrypted)]
-    internal partial class P2PGroupMemberJoinUnencrypted
+    internal partial class P2PGroup_MemberJoin_Unencrypted
     {
         [NetProperty(0)]
         public uint GroupHostId { get; set; }

@@ -94,17 +94,17 @@ namespace Nexum.Core.ReliableUdp
             return true;
         }
 
-        internal static byte[] WrapPayload(byte[] payload)
+        internal static byte[] WrapPayload(ReadOnlySpan<byte> payload)
         {
             var msg = new NetMessage();
             msg.Write(Constants.TcpSplitter);
-            msg.Write(new ByteArray(payload, true));
+            msg.WriteByteArray(payload);
             return msg.GetBuffer();
         }
 
-        internal static bool UnwrapPayload(byte[] wrappedData, out byte[] payload)
+        internal static bool UnwrapPayload(byte[] wrappedData, out ReadOnlySpan<byte> payload)
         {
-            payload = null;
+            payload = default(ReadOnlySpan<byte>);
 
             var msg = new NetMessage(wrappedData, true);
             if (!msg.Read(out ushort magic))
@@ -113,12 +113,7 @@ namespace Nexum.Core.ReliableUdp
             if (magic != Constants.TcpSplitter)
                 return false;
 
-            var unwrappedPayload = new ByteArray();
-            if (!msg.Read(ref unwrappedPayload))
-                return false;
-
-            payload = unwrappedPayload.GetBuffer();
-            return true;
+            return msg.ReadByteArrayAsSpan(out payload);
         }
     }
 }

@@ -4,7 +4,7 @@ using Nexum.Core.Configuration;
 namespace Nexum.Core.Rmi.C2S
 {
     [NetRmi(NexumOpCode.P2P_NotifyDirectP2PDisconnected)]
-    internal partial class P2PNotifyDirectP2PDisconnected
+    internal partial class P2P_NotifyDirectP2PDisconnected
     {
         [NetProperty(0)]
         public uint HostId { get; set; }

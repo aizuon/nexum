@@ -5,7 +5,7 @@ using Nexum.Core.Configuration;
 namespace Nexum.Core.Rmi.S2C
 {
     [NetRmi(NexumOpCode.S2C_CreateUdpSocketAck)]
-    internal partial class S2CCreateUdpSocketAck
+    internal partial class S2C_CreateUdpSocketAck
     {
         [NetProperty(0)]
         public bool Result { get; set; }
