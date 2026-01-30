@@ -5,7 +5,7 @@ using Nexum.Core.Configuration;
 namespace Nexum.Core.Message.C2S
 {
     [NetCoreMessage(MessageType.PeerUdp_NotifyHolepunchSuccess)]
-    internal partial class PeerUdpNotifyHolepunchSuccess
+    internal partial class PeerUdp_NotifyHolepunchSuccess
     {
         [NetProperty(0)]
         public IPEndPoint LocalEndPoint { get; set; }
